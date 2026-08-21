@@ -1,0 +1,22 @@
+option "title" "TallyMind 个人与家庭财务账本"
+option "operating_currency" "CNY"
+option "documents" "documents"
+
+; =========================================================================
+; 启用核心插件全家桶
+; =========================================================================
+; 1. 自动为新分类开户 
+plugin "beancount_lazy_plugins.auto_accounts"
+
+; 2. 启用大额年费分摊
+plugin "beancount_reds_plugins.amortize_over"
+
+; 3. 启用大屏看板扩展
+custom "fava-extension" "fava_dashboards"
+custom "fava-extension" "beantab"
+custom "fava-extension" "fava_envelope"
+custom "fava-extension" "fava_portfolio_returns"
+
+; 引入子账本
+include "accounts.bean"
+include "2026.bean"

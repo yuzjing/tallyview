@@ -1,0 +1,26 @@
+FROM python:3.13-alpine
+
+
+RUN apk add --no-cache tzdata ca-certificates gcc musl-dev libxml2-dev libxslt-dev git
+ENV TZ=Asia/Shanghai
+
+WORKDIR /data
+
+
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+    fava \
+    fava-dashboards \
+    beantab \
+    fava-portfolio-returns \
+    fava-investor \
+    fava-currency-tracker \
+    fava-envelope \
+    beancount-lazy-plugins \
+    beancount-plugins \
+    beancount-share \
+    beancount_reds_plugins
+
+EXPOSE 5000
+
+CMD ["fava", "--host", "0.0.0.0", "--port", "5000", "/data/main.bean"]

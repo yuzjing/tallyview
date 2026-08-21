@@ -1,0 +1,29 @@
+- name: 📊 财务综合总览
+  dashboard:
+    - title: 💰 资产净值走势 (Net Worth)
+      type: echarts
+      width: 100%
+      query: |
+        SELECT date, sum(position) WHERE account ~ 'Assets|Liabilities'
+      option:
+        xAxis: { type: 'time' }
+        yAxis: { type: 'value' }
+        series: [{ type: 'line', smooth: true, areaStyle: {} }]
+
+    - title: 🍕 月度支出分类占比
+      type: echarts
+      width: 50%
+      query: |
+        SELECT category, sum(position) WHERE account ~ 'Expenses' GROUP BY category
+      option:
+        series: [{ type: 'pie', radius: ['40%', '70%'], avoidLabelOverlap: false }]
+
+    - title: 📈 本月各账户支出排行
+      type: echarts
+      width: 50%
+      query: |
+        SELECT account, sum(position) WHERE account ~ 'Expenses' GROUP BY account ORDER BY sum(position) DESC
+      option:
+        xAxis: { type: 'value' }
+        yAxis: { type: 'category' }
+        series: [{ type: 'bar' }]

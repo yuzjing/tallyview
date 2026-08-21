@@ -1,0 +1,42 @@
+name: Build and Push tallyview Image
+
+on:
+  push:
+    paths:
+      - 'Dockerfile'
+      - '.github/workflows/build.yaml'
+    branches:
+      - main
+  schedule:
+    - cron: '0 3 * * 1' # 每周一凌晨 3:00 自动构建一次，确保插件永远最新！
+  workflow_dispatch:     # 支持在 GitHub 网页手动一键触发
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/fava:latest

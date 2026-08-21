@@ -13,12 +13,12 @@ RUN pip install --no-cache-dir --upgrade pip && \
     fava-dashboards \
     fava-portfolio-returns \
     fava-investor \
-    fava-currency-tracker \
     fava-envelope \
-    beancount-lazy-plugins \
     beancount-plugins \
     beancount-share \
     beancount_reds_plugins
+    git+https://github.com/Evernight/fava-currency-tracker.git \
+    git+https://github.com/tarioch/beancount_lazy_plugins.git
 
 EXPOSE 5000
 

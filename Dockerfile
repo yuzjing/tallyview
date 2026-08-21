@@ -11,7 +11,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
     fava \
     fava-dashboards \
-    git+https://github.com/Evernight/beantab.git \
     fava-portfolio-returns \
     fava-investor \
     fava-currency-tracker \

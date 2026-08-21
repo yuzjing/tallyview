@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     fava-envelope \
     beancount-plugins \
     beancount-share \
-    beancount_reds_plugins
+    beancount_reds_plugins \
     git+https://github.com/Evernight/fava-currency-tracker.git \
     git+https://github.com/tarioch/beancount_lazy_plugins.git
 

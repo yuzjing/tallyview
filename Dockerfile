@@ -2,7 +2,7 @@ FROM python:3.13-alpine
 
 
 # 安装时区、安全证书与基础构建环境
-RUN apk add --no-cache tzdata ca-certificates gcc musl-dev libxml2-dev libxslt-dev
+RUN apk add --no-cache tzdata ca-certificates gcc musl-dev libxml2-dev libxslt-dev m4
 ENV TZ=Asia/Shanghai
 
 WORKDIR /data

@@ -1,15 +1,12 @@
-name: Build and Push tallyview Image
+name: Build and Push TallyView Docker Image
 
 on:
   push:
-    paths:
-      - 'Dockerfile'
-      - '.github/workflows/build.yaml'
     branches:
       - main
   schedule:
-    - cron: '0 3 * * 1' # 每周一凌晨 3:00 自动构建一次，确保插件永远最新！
-  workflow_dispatch:     # 支持在 GitHub 网页手动一键触发
+    - cron: '0 3 * * 1' # 每周一凌晨 3:00 自动拉取依赖重新打包，确保插件永远最新
+  workflow_dispatch:     # 支持在 GitHub 网页手动点击触发
 
 jobs:
   build-and-push:
@@ -19,7 +16,7 @@ jobs:
       packages: write
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
@@ -39,4 +36,5 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}/fava:latest
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}

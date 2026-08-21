@@ -1,0 +1,44 @@
+; =============================================================================
+; 1. 资产类账户 (Assets)
+; =============================================================================
+2020-01-01 open Assets:WeChat:Wallet CNY           ; 微信零钱
+2020-01-01 open Assets:Alipay:Balance CNY          ; 支付宝余额
+2020-01-01 open Assets:Bank:Card CNY               ; 银行借记卡
+2020-01-01 open Assets:Pending:Unknown CNY         ; 🌟 待确认资产账户 (AI未识别付款方式时代扣)
+
+; =============================================================================
+; 2. 负债类账户 (Liabilities)
+; =============================================================================
+2020-01-01 open Liabilities:CreditCard:Default CNY ; 信用卡
+2020-01-01 open Liabilities:Alipay:Huabei CNY      ; 蚂蚁花呗
+2020-01-01 open Liabilities:Pending:Unknown CNY    ; 🌟 待确认负债账户
+
+; =============================================================================
+; 3. 支出类账户 (Expenses)
+; =============================================================================
+2020-01-01 open Expenses:Food:Dining CNY           ; 外出就餐
+2020-01-01 open Expenses:Food:Groceries CNY        ; 买菜生鲜
+2020-01-01 open Expenses:Food:Drinks CNY           ; 咖啡茶饮
+2020-01-01 open Expenses:Transport:Taxi CNY        ; 打车出行
+2020-01-01 open Expenses:Transport:Public CNY      ; 公共交通
+2020-01-01 open Expenses:Transport:Subscription CNY; 骑行月卡/加油
+2020-01-01 open Expenses:Shopping:Daily CNY        ; 日常用品
+2020-01-01 open Expenses:Shopping:Electronics CNY  ; 数码配件
+2020-01-01 open Expenses:Digital:Subscription CNY  ; 软件会员/订阅
+2020-01-01 open Expenses:Entertainment:Game CNY    ; 游戏娱乐
+2020-01-01 open Expenses:Housing:Rent CNY          ; 房租
+2020-01-01 open Expenses:Housing:Utilities CNY     ; 水电燃气物业
+2020-01-01 open Expenses:Pending:Uncategorized CNY ; 🌟 待分类支出 (AI无法确定分类时代扣)
+
+; =============================================================================
+; 4. 收入类账户 (Income)
+; =============================================================================
+2020-01-01 open Income:Salary CNY                  ; 工资收入
+2020-01-01 open Income:Refund CNY                  ; 购物退款
+2020-01-01 open Income:Investment CNY              ; 理财收益
+2020-01-01 open Income:Pending:Uncategorized CNY   ; 🌟 待分类收入
+
+; =============================================================================
+; 5. 权益类账户 (Equity)
+; =============================================================================
+2020-01-01 open Equity:Opening-Balances CNY        ; 期初平衡账户

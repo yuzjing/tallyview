@@ -14,24 +14,22 @@
 
 ## ✨ Highlights
 
-- **Batteries-Included Suite**: Pre-installed with top-tier Plain-Text Accounting (PTA) extensions including `fava-dashboards` (ECharts), `fava-envelope` (YNAB-style budgeting), `beantab` (spreadsheet reconciliation), and `fava-portfolio-returns` (IRR/TWR metrics).
-- **Zero Configuration Boilerplate**: Bundles `auto_accounts` and `amortize_over` plugins out of the box—no more syntax errors on undeclared accounts or distorted annual subscription expenses.
-- **Ultra-Lightweight & Low Resource Footprint**: Built on Alpine Linux.
+- **Batteries-Included Suite**: Pre-installed with audited, top-tier Plain-Text Accounting (PTA) extensions, including `fava-dashboards` (ECharts visual analytics), `fava-envelope` (YNAB-style budgeting), and `fava-portfolio-returns` (IRR/TWR metrics).
+- **Automated Bookkeeping Enhancements**: Native `auto_accounts` plugin for dynamic on-the-fly account declarations and `beancount_reds_plugins` (`amortize_over`) for amortizing annual expenses over 12 months.
+- **Ultra-Lightweight & Low Resource Footprint**: Built on Alpine Linux (~50MB image, ~35MB runtime RAM), making it ideal for 1C1G resource-constrained VPS instances.
 - **Seamless Ecosystem Pairing**: Designed as the dedicated visual cockpit for [TallyMind](https://github.com/yuzjing/tallymind) (the Go-based multimodal AI bookkeeping agent).
 
 ---
 
 ## 📦 Pre-Bundled Plugins & Extensions
 
-| Extension / Plugin | Category | Purpose |
+| Extension / Plugin | Source & Category | Purpose |
 | :--- | :--- | :--- |
-| **`fava-dashboards`** | Visualization | Customizable ECharts visual dashboards via YAML. |
-| **`fava-envelope`** | Budgeting | Envelope (YNAB-style) budget tracking with visual bars. |
-| **`beantab`** | Reconciliation | Spreadsheet interface inside Fava for balance assertions. |
-| **`fava-portfolio-returns`** | Investment | Time-Weighted (TWR) and Money-Weighted (IRR) return rates. |
-| **`beancount-lazy-plugins`** | Core Automation | Dynamic `auto_accounts` on-the-fly declaration. |
-| **`beancount_reds_plugins`** | Amortization | Spreading annual expenses (`amortize_over`) over 12 months. |
-| **`beancount-share`** | Expense Sharing | Automatic split-bill handling and settlement tracking. |
+| **`fava-dashboards`** | PyPI / Visualization | Customizable ECharts visual dashboards via YAML. |
+| **`fava-envelope`** | PyPI / Budgeting | Envelope (YNAB-style) budget tracking with visual bars. |
+| **`fava-portfolio-returns`** | PyPI / Investment | Time-Weighted (TWR) and Money-Weighted (IRR) return rates. |
+| **`beancount.plugins.auto_accounts`** | Built-in / Automation | Native on-the-fly declaration of new accounts. |
+| **`beancount_reds_plugins`** | PyPI / Amortization | Spreading annual expenses (`amortize_over`) over 12 months. |
 
 ---
 

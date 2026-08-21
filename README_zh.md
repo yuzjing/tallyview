@@ -14,26 +14,23 @@
 
 ## ✨ 核心特性
 
-- **开箱即用全家桶**：预装 Beancount 生态最受欢迎的顶级扩展，包括 `fava-dashboards`（ECharts 自定义大屏）、`fava-envelope`（信封预算法）、`beantab`（表格对账）与 `fava-portfolio-returns`（真实投资收益率 IRR/TWR）。
-- **自动化记账增强**：内置 `auto_accounts`（新科目自动开户）与 `amortize_over`（大额年费按月自动分摊），彻底消灭未开户报错与月度损益表失真。
-- **极致轻量与低资源消耗**：基于 Alpine Linux 精简构建。
+
+- **开箱即用全家桶**：预装 Beancount 生态官方与社区顶级扩展，包括 `fava-dashboards`（ECharts 自定义大屏）、`fava-envelope`（信封预算法）与 `fava-portfolio-returns`（真实投资收益率 IRR/TWR）。
+- **自动化记账增强**：内置 Beancount 官方 `auto_accounts`（新科目自动免报错开户）与 `beancount_reds_plugins`（大额年费按月自动分摊 `amortize_over`），彻底消灭未开户报错与月度损益表失真。
+- **极致轻量与低资源消耗**：基于 Alpine Linux 精简构建（镜像仅 ~50MB，运行内存仅 ~35MB），完美适配 1C1G 资源受限型 VPS。
 - **双星生态协同**：专为配合 [TallyMind](https://github.com/yuzjing/tallymind)（基于 Go 的多模态 AI 记账 Agent）提供实时可视化数据看板。
 
 ---
 
 ## 📦 预装插件清单
 
-| 插件 / 扩展名称 | 分类 | 核心价值 |
+| 插件 / 扩展名称 | 来源与分类 | 核心价值 |
 | :--- | :--- | :--- |
-| **`fava-dashboards`** | 数据可视化 | 支持用 YAML 配置丰富的 ECharts 交互式图表大屏。 |
-| **`fava-envelope`** | 预算规划 | 引入 YNAB 信封预算法，实时掌握剩余可用预算。 |
-| **`beantab`** | 账户核对 | 在 Fava 内部提供类 Excel 的电子表格对账录入界面。 |
-| **`fava-portfolio-returns`**| 投资分析 | 计算时间加权（TWR）与资金加权（IRR/年化）真实回报率。 |
-| **`beancount-lazy-plugins`** | 自动化规则 | 提供 `auto_accounts` 自动声明新账户。 |
-| **`beancount_reds_plugins`** | 账目分摊 | 支持大额年费/租金跨 12 个月均匀平摊 (`amortize_over`)。 |
-| **`beancount-share`** | 账单分摊 | 优雅处理朋友聚餐/合租 AA 制自动平账。 |
-
----
+| **`fava-dashboards`** | PyPI / 数据可视化 | 支持用 YAML 配置丰富的 ECharts 交互式图表大屏。 |
+| **`fava-envelope`** | PyPI / 预算规划 | 引入 YNAB 信封预算法，实时掌握剩余可用预算。 |
+| **`fava-portfolio-returns`** | PyPI / 投资分析 | 计算时间加权（TWR）与资金加权（IRR/年化）真实回报率。 |
+| **`beancount.plugins.auto_accounts`** | 官方内置 / 自动化规则 | 原生自动为新科目声明开户，彻底消除未开户语法报错。 |
+| **`beancount_reds_plugins`** | PyPI / 账目分摊 | 支持大额年费/租金跨 12 个月均匀平摊 (`amortize_over`)。 |
 
 ## ⚡ 快速开始
 

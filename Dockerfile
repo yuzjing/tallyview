@@ -1,7 +1,13 @@
 FROM python:3.13-alpine
 
-# 安装编译依赖 -> 安装 Fava 及所有主流扩展库 -> 立即清除编译缓存与临时包
-RUN apk add --no-cache --virtual .build-deps gcc musl-dev git && \
+RUN apk add --no-cache --virtual .build-deps \
+        gcc \
+        g++ \
+        musl-dev \
+        m4 \
+        flex \
+        bison \
+        git && \
     pip install --no-cache-dir \
         fava \
         fava-dashboards \
@@ -9,7 +15,6 @@ RUN apk add --no-cache --virtual .build-deps gcc musl-dev git && \
         fava-portfolio-returns \
         beancount-reds-plugins && \
     apk del .build-deps
-
 WORKDIR /app
 EXPOSE 5000
 

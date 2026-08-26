@@ -1,0 +1,156 @@
+/* /srv/tallyview/custom.css */
+
+/* ==========================================================================
+   1. 全局字体与现代色彩体系 (Apple / Tailwind Clean Design)
+   ========================================================================== */
+:root {
+    --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --primary-color: #2563eb;
+    --primary-hover: #1d4ed8;
+    --sidebar-bg: #1e293b;
+    --sidebar-text: #94a3b8;
+    --sidebar-active: #ffffff;
+    --card-bg: #ffffff;
+    --card-border: #e2e8f0;
+    --border-radius: 10px;
+}
+
+body {
+    font-family: var(--font-family) !important;
+    letter-spacing: -0.01em;
+    background-color: #f8fafc !important;
+}
+
+/* ==========================================================================
+   2. 侧边栏 (Sidebar) 现代化深色质感
+   ========================================================================== */
+aside {
+    background-color: var(--sidebar-bg) !important;
+    border-right: 1px solid #334155 !important;
+}
+
+aside h3, aside .header, aside .logo {
+    color: #f8fafc !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.5px;
+}
+
+aside a {
+    color: var(--sidebar-text) !important;
+    border-radius: 8px !important;
+    margin: 2px 8px !important;
+    padding: 8px 12px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    transition: all 0.15s ease-in-out !important;
+}
+
+aside a:hover {
+    background-color: #334155 !important;
+    color: #ffffff !important;
+}
+
+aside a.selected {
+    background-color: var(--primary-color) !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
+    box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.25) !important;
+}
+
+/* ==========================================================================
+   3. 顶部导航与搜索框 (Header & Search Bar)
+   ========================================================================== */
+header {
+    background-color: #ffffff !important;
+    border-bottom: 1px solid var(--card-border) !important;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03) !important;
+}
+
+header form input[type="text"] {
+    border-radius: 20px !important;
+    border: 1px solid var(--card-border) !important;
+    background-color: #f1f5f9 !important;
+    padding: 6px 16px !important;
+    font-size: 13px !important;
+    transition: all 0.2s ease !important;
+}
+
+header form input[type="text"]:focus {
+    background-color: #ffffff !important;
+    border-color: var(--primary-color) !important;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
+}
+
+/* ==========================================================================
+   4. 内容主区域与卡片容器 (Cards & Panels)
+   ========================================================================== */
+article {
+    padding: 20px 24px !important;
+}
+
+/* 表格与看板卡片化 */
+.content, .table-container, .fava-dashboards-panel {
+    background-color: var(--card-bg) !important;
+    border: 1px solid var(--card-border) !important;
+    border-radius: var(--border-radius) !important;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04) !important;
+    margin-bottom: 18px !important;
+    overflow: hidden !important;
+}
+
+/* ==========================================================================
+   5. 数据表格 (Tables) 现代极简风格
+   ========================================================================== */
+table {
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+    width: 100% !important;
+    font-size: 13px !important;
+}
+
+table th {
+    background-color: #f8fafc !important;
+    color: #475569 !important;
+    font-weight: 600 !important;
+    padding: 10px 14px !important;
+    border-bottom: 1px solid var(--card-border) !important;
+}
+
+table td {
+    padding: 10px 14px !important;
+    border-bottom: 1px solid #f1f5f9 !important;
+    color: #1e293b !important;
+}
+
+table tr:last-child td {
+    border-bottom: none !important;
+}
+
+table tr:hover td {
+    background-color: #f8fafc !important;
+}
+
+/* ==========================================================================
+   6. 按钮与标签徽章 (Badges & Buttons)
+   ========================================================================== */
+button, .button {
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+    transition: all 0.15s ease !important;
+}
+
+.button.primary {
+    background-color: var(--primary-color) !important;
+    color: #ffffff !important;
+}
+
+.button.primary:hover {
+    background-color: var(--primary-hover) !important;
+}
+
+/* 状态标签圆角化 */
+.tag, .status-indicator {
+    border-radius: 4px !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+}

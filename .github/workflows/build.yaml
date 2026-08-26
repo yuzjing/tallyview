@@ -18,19 +18,23 @@ jobs:
       packages: write
 
     steps:
+      # 1. 检出代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. 初始化 Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to the Container registry
+      # 3. 登录 GHCR
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 4. 提取 Docker 规范标签
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
@@ -39,23 +43,26 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
-            type=sha
+            type=sha,prefix=sha-
 
+      # 5. 高速编译并推送到 GHCR (单架构 amd64 + GHA 缓存)
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # 自动清理历史旧版本 (保留最新的 10 个版本)
-      - name: Clean up old container versions
+      # 6. 强力自动大扫除 (只保留最新的 2 个版本，其余旧版本自动彻底物理删除)
+      - name: Auto Clean Old Container Versions
         uses: actions/delete-package-versions@v5
         with:
           package-name: 'tallyview'
           package-type: 'container'
-          min-versions-to-keep: 10
+          min-versions-to-keep: 2
           delete-only-untagged-versions: 'false'
+          token: ${{ secrets.GITHUB_TOKEN }}

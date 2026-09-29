@@ -4,12 +4,16 @@ dashboards:
   # ==============================================================================
   - name: "Assets · 资产总览 ✨"
     panels:
-      - title: 资产净值走势 (Net Worth Trend)
+      # --- 1.1 资产净值走势 ---
+      - title: 资产净值走势 (支持家庭总览/个人任意勾选对比)
         type: echarts
         width: 100%
-        height: 360px
+        height: 380px
         script: |
           try {
+            const safeQuery = async (bql) => {
+              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            };
             const parseNum = (v) => {
               if (v == null) return 0;
               if (typeof v === 'number') return v;
@@ -18,48 +22,73 @@ dashboards:
               return 0;
             };
 
-            const data = await fava.query("SELECT date, sum(cost(position)) as total WHERE account ~ '^Assets|^Liabilities' GROUP BY date ORDER BY date");
-            if (!data || data.length === 0) {
-              return { title: { text: '暂无净值走势数据', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 14 } }, series: [] };
-            }
-            const dates = data.map(r => r.date);
-            const values = data.map(r => Math.round(parseNum(r.total) * 100) / 100);
+            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets|^Liabilities'");
+            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
 
-            return {
-              tooltip: { trigger: 'axis', formatter: '{b}<br/>净资产: <b>¥{c}</b>' },
-              grid: { left: '3%', right: '4%', top: 40, bottom: 25, containLabel: true },
-              xAxis: { type: 'category', boundaryGap: false, data: dates },
-              yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-              series: [{
-                name: '净资产',
+            const totalData = await safeQuery("SELECT date, sum(cost(position)) as total WHERE account ~ '^Assets|^Liabilities' GROUP BY date ORDER BY date");
+            const dates = totalData.length > 0 ? totalData.map(r => r.date) : ['今日'];
+            const totalValues = totalData.length > 0 ? totalData.map(r => Math.round(parseNum(r.total) * 100) / 100) : [0];
+
+            const seriesList = [{
+              name: '👨‍👩‍👧‍👦 家庭总额',
+              type: 'line',
+              smooth: true,
+              showSymbol: true,
+              symbolSize: 8,
+              data: totalValues,
+              lineStyle: { width: 3, color: '#3b82f6' },
+              itemStyle: { color: '#2563eb' }
+            }];
+
+            const memberColors = ['#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4', '#f97316'];
+
+            for (let i = 0; i < members.length; i++) {
+              const m = members[i];
+              const mData = await safeQuery(`SELECT date, sum(cost(position)) as total WHERE account ~ '^Assets:${m}|^Liabilities:${m}' GROUP BY date ORDER BY date`);
+              const mValues = dates.map(d => {
+                const row = mData.find(r => r.date === d);
+                return row ? Math.round(parseNum(row.total) * 100) / 100 : 0;
+              });
+
+              seriesList.push({
+                name: `👤 ${m}`,
                 type: 'line',
                 smooth: true,
                 showSymbol: true,
-                symbolSize: 8,
-                data: values,
-                lineStyle: { width: 3, color: '#3b82f6' },
-                itemStyle: { color: '#2563eb' },
-                areaStyle: {
-                  color: {
-                    type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-                    colorStops: [
-                      { offset: 0, color: 'rgba(59, 130, 246, 0.38)' },
-                      { offset: 1, color: 'rgba(59, 130, 246, 0.02)' }
-                    ]
-                  }
-                }
-              }]
+                symbolSize: 6,
+                data: mValues,
+                lineStyle: { width: 2, color: memberColors[i % memberColors.length] },
+                itemStyle: { color: memberColors[i % memberColors.length] }
+              });
+            }
+
+            return {
+              tooltip: { trigger: 'axis' },
+              legend: {
+                top: 5,
+                right: 'center',
+                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }],
+                selectorPosition: 'end'
+              },
+              grid: { left: '3%', right: '4%', top: 55, bottom: 25, containLabel: true },
+              xAxis: { type: 'category', boundaryGap: false, data: dates },
+              yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+              series: seriesList
             };
           } catch (e) {
-            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+            return { series: [] };
           }
 
-      - title: 资产账户结构分布
+      # --- 1.2 各渠道资产分布 (带成员图例与筛选) ---
+      - title: 资产机构与各成员分布 (支持图例按成员过滤)
         type: echarts
         width: 50%
-        height: 320px
+        height: 350px
         script: |
           try {
+            const safeQuery = async (bql) => {
+              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            };
             const parseNum = (v) => {
               if (v == null) return 0;
               if (typeof v === 'number') return v;
@@ -68,50 +97,53 @@ dashboards:
               return 0;
             };
 
-            const data = await fava.query("SELECT root(account, 3) as acc, sum(cost(position)) as total WHERE account ~ '^Assets' GROUP BY acc ORDER BY total DESC");
-            if (!data || data.length === 0) {
-              return { title: { text: '暂无资产分布', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 13 } }, series: [] };
-            }
+            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
+            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
 
-            const pieData = data.map(r => {
-              const parts = r.acc.split(':');
-              const label = parts.length >= 3 ? parts[2] : r.acc.replace('Assets:', '');
-              return { name: label, value: Math.abs(Math.round(parseNum(r.total) * 100) / 100) };
+            const accData = await safeQuery("SELECT root(account, 3) as acc, sum(cost(position)) as total WHERE account ~ '^Assets' GROUP BY acc");
+            const channels = Array.from(new Set(accData.map(r => r.acc.split(':')[2]).filter(Boolean)));
+
+            const memberColors = ['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
+            const seriesList = members.map((m, idx) => {
+              const dataVals = channels.map(ch => {
+                const row = accData.find(r => r.acc === `Assets:${m}:${ch}`);
+                return row ? Math.abs(Math.round(parseNum(row.total) * 100) / 100) : 0;
+              });
+              return {
+                name: `👤 ${m}`,
+                type: 'bar',
+                stack: 'totalAssets',
+                barMaxWidth: 30,
+                itemStyle: { color: memberColors[idx % memberColors.length] },
+                data: dataVals
+              };
             });
 
-            const totalSum = pieData.reduce((acc, cur) => acc + cur.value, 0);
-
             return {
-              tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+              tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
               legend: {
-                orient: 'vertical', left: 'left', top: 'middle', textStyle: { fontSize: 11 },
-                formatter: function(name) {
-                  const target = pieData.find(d => d.name === name);
-                  if (!target || totalSum === 0) return name;
-                  const pct = ((target.value / totalSum) * 100).toFixed(2);
-                  return `${name} (${pct}%)`;
-                }
+                top: 5, right: 'center',
+                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }]
               },
-              series: [{
-                type: 'pie',
-                radius: ['45%', '70%'],
-                center: ['65%', '50%'],
-                avoidLabelOverlap: true,
-                itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
-                label: { show: false },
-                data: pieData
-              }]
+              grid: { left: '3%', right: '4%', top: 50, bottom: 25, containLabel: true },
+              xAxis: { type: 'category', data: channels.length ? channels : ['暂无'] },
+              yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+              series: seriesList.length ? seriesList : [{ type: 'bar', data: [0] }]
             };
           } catch (e) {
-            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+            return { series: [] };
           }
 
-      - title: 负债与未结清账款
+      # --- 1.3 负债与未结清账款 (带成员图例与筛选) ---
+      - title: 负债机构分布 (按成员堆叠/图例筛选)
         type: echarts
         width: 50%
-        height: 320px
+        height: 350px
         script: |
           try {
+            const safeQuery = async (bql) => {
+              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            };
             const parseNum = (v) => {
               if (v == null) return 0;
               if (typeof v === 'number') return v;
@@ -120,55 +152,57 @@ dashboards:
               return 0;
             };
 
-            const data = await fava.query("SELECT root(account, 3) as acc, sum(cost(position)) as total WHERE account ~ '^Liabilities' GROUP BY acc ORDER BY total ASC");
-            if (!data || data.length === 0) {
-              return { title: { text: '🎉 当前无未结清负债', left: 'center', top: 'center', textStyle: { color: '#10b981', fontSize: 14 } }, series: [] };
-            }
+            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Liabilities'");
+            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
 
-            const pieData = data.map(r => {
-              const parts = r.acc.split(':');
-              const label = parts.length >= 3 ? parts[2] : r.acc.replace('Liabilities:', '');
-              return { name: label, value: Math.abs(Math.round(parseNum(r.total) * 100) / 100) };
+            const liaData = await safeQuery("SELECT root(account, 3) as acc, sum(cost(position)) as total WHERE account ~ '^Liabilities' GROUP BY acc");
+            const channels = Array.from(new Set(liaData.map(r => r.acc.split(':')[2]).filter(Boolean)));
+
+            const memberColors = ['#f43f5e', '#f97316', '#a855f7', '#6366f1'];
+            const seriesList = members.map((m, idx) => {
+              const dataVals = channels.map(ch => {
+                const row = liaData.find(r => r.acc === `Liabilities:${m}:${ch}`);
+                return row ? Math.abs(Math.round(parseNum(row.total) * 100) / 100) : 0;
+              });
+              return {
+                name: `👤 ${m}`,
+                type: 'bar',
+                stack: 'totalDebt',
+                barMaxWidth: 30,
+                itemStyle: { color: memberColors[idx % memberColors.length] },
+                data: dataVals
+              };
             });
 
-            const totalSum = pieData.reduce((acc, cur) => acc + cur.value, 0);
-
             return {
-              tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+              tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
               legend: {
-                orient: 'vertical', left: 'left', top: 'middle', textStyle: { fontSize: 11 },
-                formatter: function(name) {
-                  const target = pieData.find(d => d.name === name);
-                  if (!target || totalSum === 0) return name;
-                  const pct = ((target.value / totalSum) * 100).toFixed(2);
-                  return `${name} (${pct}%)`;
-                }
+                top: 5, right: 'center',
+                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }]
               },
-              series: [{
-                type: 'pie',
-                radius: ['45%', '70%'],
-                center: ['65%', '50%'],
-                avoidLabelOverlap: true,
-                itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
-                label: { show: false },
-                data: pieData
-              }]
+              grid: { left: '3%', right: '4%', top: 50, bottom: 25, containLabel: true },
+              xAxis: { type: 'category', data: channels.length ? channels : ['无欠款'] },
+              yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+              series: seriesList.length ? seriesList : [{ type: 'bar', data: [0] }]
             };
           } catch (e) {
-            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+            return { series: [] };
           }
 
   # ==============================================================================
-  # 2. 资金流向全景 (Sankey 桑基图 + 大类排行)
+  # 2. 资金流向全景 (带家庭成员流向枢纽)
   # ==============================================================================
   - name: "Flow · 资金流向 🌊"
     panels:
-      - title: 收入 ➔ 核心支出 ➔ 储蓄资产沉淀 (资金流向图)
+      - title: 收入 ➔ 家庭成员分流 ➔ 核心支出大类 ➔ 结余沉淀
         type: echarts
         width: 100%
         height: 520px
         script: |
           try {
+            const safeQuery = async (bql) => {
+              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            };
             const parseNum = (v) => {
               if (v == null) return 0;
               if (typeof v === 'number') return v;
@@ -177,34 +211,57 @@ dashboards:
               return 0;
             };
 
-            const incData = await fava.query("SELECT sum(cost(position)) as total WHERE account ~ '^Income'");
-            const expData = await fava.query("SELECT root(account, 2) as cat, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY cat");
+            const incData = await safeQuery("SELECT sum(cost(position)) as total WHERE account ~ '^Income'");
             const totalIncome = Math.abs(parseNum(incData?.[0]?.total));
-            
-            const nodes = [{ name: '总收入' }];
+
+            // ⭐️ 核心 1：按成员和支出大类联合聚合
+            const expData = await safeQuery("SELECT root(account, 2) as cat, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY cat, owner");
+
+            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
+            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
+
+            const nodes = [{ name: '💰 家庭总收入' }];
             const links = [];
             let totalExpense = 0;
 
-            if (expData && expData.length > 0) {
-              expData.forEach(r => {
-                const val = Math.abs(Math.round(parseNum(r.total) * 100) / 100);
-                if (val > 0) {
-                  const name = r.cat.replace('Expenses:', '支出:');
-                  nodes.push({ name: name });
-                  links.push({ source: '总收入', target: name, value: val });
-                  totalExpense += val;
-                }
-              });
-            }
+            const memExpenseMap = {};
+            members.forEach(m => memExpenseMap[m.toLowerCase()] = 0);
 
+            expData.forEach(r => {
+              const val = Math.abs(Math.round(parseNum(r.total) * 100) / 100);
+              if (val > 0) {
+                totalExpense += val;
+                const own = (r.owner || members[0] || '默认').toLowerCase();
+                memExpenseMap[own] = (memExpenseMap[own] || 0) + val;
+
+                const catName = r.cat.replace('Expenses:', '支出:');
+                if (!nodes.find(n => n.name === catName)) nodes.push({ name: catName });
+                
+                // 连线：成员 ➔ 具体消费大类
+                const memLabel = `👤 ${own.toUpperCase()}`;
+                if (!nodes.find(n => n.name === memLabel)) nodes.push({ name: memLabel });
+                links.push({ source: memLabel, target: catName, value: val });
+              }
+            });
+
+            // 连线：总收入 ➔ 各家庭成员
+            members.forEach(m => {
+              const memSpent = memExpenseMap[m.toLowerCase()] || 0;
+              if (memSpent > 0) {
+                links.push({ source: '💰 家庭总收入', target: `👤 ${m.toUpperCase()}`, value: memSpent });
+              }
+            });
+
+            // 结余部分
             const savings = totalIncome > totalExpense ? Math.round((totalIncome - totalExpense) * 100) / 100 : 0;
             if (savings > 0) {
-              nodes.push({ name: '结余储蓄' });
-              links.push({ source: '总收入', target: '结余储蓄', value: savings });
+              nodes.push({ name: '🏦 结余储蓄' });
+              links.push({ source: '💰 家庭总收入', target: '🏦 结余储蓄', value: savings });
             }
 
             if (links.length === 0) {
-              return { title: { text: '暂无收支流向数据 (尚无支出或收入)', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 14 } }, series: [] };
+              nodes.push({ name: '当前收入 (¥0)' }, { name: '暂无支出 (¥0)' });
+              links.push({ source: '当前收入 (¥0)', target: '暂无支出 (¥0)', value: 0.001 });
             }
 
             return {
@@ -215,7 +272,7 @@ dashboards:
                 top: 40,
                 bottom: 40,
                 emphasis: { focus: 'adjacency' },
-                nodeWidth: 18,
+                nodeWidth: 20,
                 nodeGap: 16,
                 data: nodes,
                 links: links,
@@ -223,21 +280,24 @@ dashboards:
               }]
             };
           } catch (e) {
-            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+            return { series: [] };
           }
 
   # ==============================================================================
-  # 3. 周期收支深度大盘 (周 / 月 / 季 / 半年 4 宫格矩阵)
+  # 3. 周期收支深度大盘 (周/月/季/半年 全景图表带家庭成员图例控制)
   # ==============================================================================
   - name: "Monthly · 周期收支 📈"
     panels:
-      # --- 1. 周度收支趋势 (近 8 周) ---
-      - title: 1. 周度收支趋势 (近 8 周)
+      # --- 3.1 周度收支趋势 (支持成员独立筛选/堆叠) ---
+      - title: 1. 周度收支 (支出按家庭成员堆叠/图例控制)
         type: echarts
         width: 50%
         height: 350px
         script: |
           try {
+            const safeQuery = async (bql) => {
+              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            };
             const parseNum = (v) => {
               if (v == null) return 0;
               if (typeof v === 'number') return v;
@@ -246,59 +306,81 @@ dashboards:
               return 0;
             };
 
-            const expData = await fava.query("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date ORDER BY date") || [];
-            const incData = await fava.query("SELECT date, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY date ORDER BY date") || [];
+            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
+            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
 
-            if (expData.length === 0 && incData.length === 0) {
-              return { title: { text: '暂无周度流水数据', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 13 } }, series: [] };
-            }
+            const expData = await safeQuery("SELECT date, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date, owner");
+            const incData = await safeQuery("SELECT date, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY date");
 
-            // 按周划分字典
             const getWeekLabel = (dStr) => {
               const d = new Date(dStr);
               const oneJan = new Date(d.getFullYear(), 0, 1);
-              const weekNum = Math.ceil((((d - oneJan) / 86400000) + oneJan.getDay() + 1) / 7);
-              return `W${weekNum}`;
+              return `W${Math.ceil((((d - oneJan) / 86400000) + oneJan.getDay() + 1) / 7)}`;
             };
 
             const weekMap = {};
             expData.forEach(r => {
               const w = getWeekLabel(r.date);
-              if (!weekMap[w]) weekMap[w] = { exp: 0, inc: 0 };
-              weekMap[w].exp += Math.abs(parseNum(r.total));
+              if (!weekMap[w]) weekMap[w] = { inc: 0 };
+              const own = (r.owner || '其他').toLowerCase();
+              weekMap[w][own] = (weekMap[w][own] || 0) + Math.abs(parseNum(r.total));
             });
             incData.forEach(r => {
               const w = getWeekLabel(r.date);
-              if (!weekMap[w]) weekMap[w] = { exp: 0, inc: 0 };
+              if (!weekMap[w]) weekMap[w] = { inc: 0 };
               weekMap[w].inc += Math.abs(parseNum(r.total));
             });
 
-            const weeks = Object.keys(weekMap).slice(-8); // 仅展示最近 8 周
-            const expValues = weeks.map(w => Math.round(weekMap[w].exp * 100) / 100);
-            const incValues = weeks.map(w => Math.round(weekMap[w].inc * 100) / 100);
+            let weeks = Object.keys(weekMap).slice(-8);
+            if (!weeks.length) { weeks = ['本周']; weekMap['本周'] = { inc: 0 }; }
+
+            const memberColors = ['#f43f5e', '#f97316', '#ec4899', '#a855f7'];
+            const seriesList = [
+              {
+                name: '💰 家庭收入',
+                type: 'bar',
+                barMaxWidth: 20,
+                itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] },
+                data: weeks.map(w => Math.round((weekMap[w]?.inc || 0) * 100) / 100)
+              }
+            ];
+
+            members.forEach((m, idx) => {
+              seriesList.push({
+                name: `支出: ${m}`,
+                type: 'bar',
+                stack: 'weekExpense',
+                barMaxWidth: 20,
+                itemStyle: { color: memberColors[idx % memberColors.length], borderRadius: [2, 2, 0, 0] },
+                data: weeks.map(w => Math.round((weekMap[w]?.[m.toLowerCase()] || 0) * 100) / 100)
+              });
+            });
 
             return {
               tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-              legend: { data: ['收入', '支出'], top: 5, right: 'center' },
-              grid: { left: '3%', right: '4%', top: 45, bottom: 20, containLabel: true },
+              legend: {
+                top: 5, right: 'center',
+                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }]
+              },
+              grid: { left: '3%', right: '4%', top: 50, bottom: 20, containLabel: true },
               xAxis: { type: 'category', data: weeks },
               yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-              series: [
-                { name: '收入', type: 'bar', barMaxWidth: 24, data: incValues, itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] } },
-                { name: '支出', type: 'bar', barMaxWidth: 24, data: expValues, itemStyle: { color: '#f43f5e', borderRadius: [3, 3, 0, 0] } }
-              ]
+              series: seriesList
             };
           } catch (e) {
-            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+            return { series: [] };
           }
 
-      # --- 2. 月度收支与结余 (近 12 个月) ---
-      - title: 2. 月度收支对比与结余走势
+      # --- 3.2 月度收支与结余 (支持成员独立筛选/堆叠) ---
+      - title: 2. 月度收支 (支出按家庭成员堆叠/图例控制)
         type: echarts
         width: 50%
         height: 350px
         script: |
           try {
+            const safeQuery = async (bql) => {
+              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            };
             const parseNum = (v) => {
               if (v == null) return 0;
               if (typeof v === 'number') return v;
@@ -307,51 +389,75 @@ dashboards:
               return 0;
             };
 
-            const exp = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month ORDER BY year, month") || [];
-            const inc = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month ORDER BY year, month") || [];
-            
-            if (exp.length === 0 && inc.length === 0) {
-              return { title: { text: '暂无月度数据', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 13 } }, series: [] };
-            }
+            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
+            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
 
-            const months = Array.from(new Set([
-              ...exp.map(r => `${r.year}-${String(r.month).padStart(2, '0')}`),
-              ...inc.map(r => `${r.year}-${String(r.month).padStart(2, '0')}`)
-            ])).sort().slice(-12);
+            const exp = await safeQuery("SELECT year, month, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month, owner");
+            const inc = await safeQuery("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month");
 
-            const expValues = months.map(m => {
-              const row = exp.find(r => `${r.year}-${String(r.month).padStart(2, '0')}` === m);
-              return row ? Math.abs(Math.round(parseNum(row.total) * 100) / 100) : 0;
+            const monthMap = {};
+            exp.forEach(r => {
+              const mKey = `${r.year}-${String(r.month).padStart(2, '0')}`;
+              if (!monthMap[mKey]) monthMap[mKey] = { inc: 0 };
+              const own = (r.owner || '其他').toLowerCase();
+              monthMap[mKey][own] = (monthMap[mKey][own] || 0) + Math.abs(parseNum(r.total));
             });
-            const incValues = months.map(m => {
-              const row = inc.find(r => `${r.year}-${String(r.month).padStart(2, '0')}` === m);
-              return row ? Math.abs(Math.round(parseNum(row.total) * 100) / 100) : 0;
+            inc.forEach(r => {
+              const mKey = `${r.year}-${String(r.month).padStart(2, '0')}`;
+              if (!monthMap[mKey]) monthMap[mKey] = { inc: 0 };
+              monthMap[mKey].inc += Math.abs(parseNum(r.total));
             });
-            const savingsValues = months.map((_, i) => Math.round((incValues[i] - expValues[i]) * 100) / 100);
+
+            let months = Object.keys(monthMap).sort().slice(-12);
+            if (!months.length) { months = ['当月']; monthMap['当月'] = { inc: 0 }; }
+
+            const memberColors = ['#f43f5e', '#f97316', '#ec4899', '#a855f7'];
+            const seriesList = [
+              {
+                name: '💰 家庭收入',
+                type: 'bar',
+                barMaxWidth: 20,
+                itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] },
+                data: months.map(m => Math.round((monthMap[m]?.inc || 0) * 100) / 100)
+              }
+            ];
+
+            members.forEach((m, idx) => {
+              seriesList.push({
+                name: `支出: ${m}`,
+                type: 'bar',
+                stack: 'monthExpense',
+                barMaxWidth: 20,
+                itemStyle: { color: memberColors[idx % memberColors.length] },
+                data: months.map(mKey => Math.round((monthMap[mKey]?.[m.toLowerCase()] || 0) * 100) / 100)
+              });
+            });
 
             return {
               tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-              legend: { data: ['收入', '支出', '净结余'], top: 5, right: 'center' },
-              grid: { left: '3%', right: '4%', top: 45, bottom: 20, containLabel: true },
+              legend: {
+                top: 5, right: 'center',
+                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }]
+              },
+              grid: { left: '3%', right: '4%', top: 50, bottom: 20, containLabel: true },
               xAxis: { type: 'category', data: months },
               yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-              series: [
-                { name: '收入', type: 'bar', barMaxWidth: 24, data: incValues, itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] } },
-                { name: '支出', type: 'bar', barMaxWidth: 24, data: expValues, itemStyle: { color: '#f43f5e', borderRadius: [3, 3, 0, 0] } },
-                { name: '净结余', type: 'line', smooth: true, data: savingsValues, itemStyle: { color: '#3b82f6' }, lineStyle: { width: 2 } }
-              ]
+              series: seriesList
             };
           } catch (e) {
-            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+            return { series: [] };
           }
 
-      # --- 3. 季度收支与储蓄洞察 ---
-      - title: 3. 季度收支与储蓄洞察 (Q1 - Q4)
+      # --- 3.3 季度收支与储蓄洞察 ---
+      - title: 3. 季度收支 (支出按家庭成员堆叠/图例控制)
         type: echarts
         width: 50%
         height: 350px
         script: |
           try {
+            const safeQuery = async (bql) => {
+              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            };
             const parseNum = (v) => {
               if (v == null) return 0;
               if (typeof v === 'number') return v;
@@ -360,50 +466,75 @@ dashboards:
               return 0;
             };
 
-            const exp = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month") || [];
-            const inc = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month") || [];
-            
-            if (exp.length === 0 && inc.length === 0) {
-              return { title: { text: '暂无季度数据', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 13 } }, series: [] };
-            }
+            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
+            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
+
+            const exp = await safeQuery("SELECT year, month, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month, owner");
+            const inc = await safeQuery("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month");
 
             const qMap = {};
-            const addToQ = (year, month, type, val) => {
-              const q = `Q${Math.ceil(month / 3)}`;
-              const key = `${year}-${q}`;
-              if (!qMap[key]) qMap[key] = { inc: 0, exp: 0 };
-              qMap[key][type] += val;
-            };
+            exp.forEach(r => {
+              const qKey = `${r.year}-Q${Math.ceil(r.month / 3)}`;
+              if (!qMap[qKey]) qMap[qKey] = { inc: 0 };
+              const own = (r.owner || '其他').toLowerCase();
+              qMap[qKey][own] = (qMap[qKey][own] || 0) + Math.abs(parseNum(r.total));
+            });
+            inc.forEach(r => {
+              const qKey = `${r.year}-Q${Math.ceil(r.month / 3)}`;
+              if (!qMap[qKey]) qMap[qKey] = { inc: 0 };
+              qMap[qKey].inc += Math.abs(parseNum(r.total));
+            });
 
-            exp.forEach(r => addToQ(r.year, r.month, 'exp', Math.abs(parseNum(r.total))));
-            inc.forEach(r => addToQ(r.year, r.month, 'inc', Math.abs(parseNum(r.total))));
+            let quarters = Object.keys(qMap).sort();
+            if (!quarters.length) { quarters = ['Q1', 'Q2', 'Q3', 'Q4']; quarters.forEach(q => qMap[q] = { inc: 0 }); }
 
-            const quarters = Object.keys(qMap).sort();
-            const incVals = quarters.map(q => Math.round(qMap[q].inc * 100) / 100);
-            const expVals = quarters.map(q => Math.round(qMap[q].exp * 100) / 100);
+            const memberColors = ['#f43f5e', '#f97316', '#ec4899', '#a855f7'];
+            const seriesList = [
+              {
+                name: '💰 家庭收入',
+                type: 'bar',
+                barMaxWidth: 24,
+                itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] },
+                data: quarters.map(q => Math.round((qMap[q]?.inc || 0) * 100) / 100)
+              }
+            ];
+
+            members.forEach((m, idx) => {
+              seriesList.push({
+                name: `支出: ${m}`,
+                type: 'bar',
+                stack: 'quarterExpense',
+                barMaxWidth: 24,
+                itemStyle: { color: memberColors[idx % memberColors.length] },
+                data: quarters.map(q => Math.round((qMap[q]?.[m.toLowerCase()] || 0) * 100) / 100)
+              });
+            });
 
             return {
               tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-              legend: { data: ['收入', '支出'], top: 5, right: 'center' },
-              grid: { left: '3%', right: '4%', top: 45, bottom: 20, containLabel: true },
+              legend: {
+                top: 5, right: 'center',
+                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }]
+              },
+              grid: { left: '3%', right: '4%', top: 50, bottom: 20, containLabel: true },
               xAxis: { type: 'category', data: quarters },
               yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-              series: [
-                { name: '收入', type: 'bar', barMaxWidth: 28, data: incVals, itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] } },
-                { name: '支出', type: 'bar', barMaxWidth: 28, data: expVals, itemStyle: { color: '#f43f5e', borderRadius: [3, 3, 0, 0] } }
-              ]
+              series: seriesList
             };
           } catch (e) {
-            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+            return { series: [] };
           }
 
-      # --- 4. 半年度收支对比 (H1 / H2) ---
-      - title: 4. 半年度收支对比 (H1 上半年 vs H2 下半年)
+      # --- 3.4 半年度收支对比 ---
+      - title: 4. 半年度收支 (支出按家庭成员堆叠/图例控制)
         type: echarts
         width: 50%
         height: 350px
         script: |
           try {
+            const safeQuery = async (bql) => {
+              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            };
             const parseNum = (v) => {
               if (v == null) return 0;
               if (typeof v === 'number') return v;
@@ -412,54 +543,79 @@ dashboards:
               return 0;
             };
 
-            const exp = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month") || [];
-            const inc = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month") || [];
-            
-            if (exp.length === 0 && inc.length === 0) {
-              return { title: { text: '暂无半年度数据', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 13 } }, series: [] };
-            }
+            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
+            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
+
+            const exp = await safeQuery("SELECT year, month, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month, owner");
+            const inc = await safeQuery("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month");
 
             const hMap = {};
-            const addToH = (year, month, type, val) => {
-              const h = month <= 6 ? 'H1 (上半年)' : 'H2 (下半年)';
-              const key = `${year} ${h}`;
-              if (!hMap[key]) hMap[key] = { inc: 0, exp: 0 };
-              hMap[key][type] += val;
-            };
+            exp.forEach(r => {
+              const hKey = `${r.year} ${r.month <= 6 ? 'H1(上半年)' : 'H2(下半年)'}`;
+              if (!hMap[hKey]) hMap[hKey] = { inc: 0 };
+              const own = (r.owner || '其他').toLowerCase();
+              hMap[hKey][own] = (hMap[hKey][own] || 0) + Math.abs(parseNum(r.total));
+            });
+            inc.forEach(r => {
+              const hKey = `${r.year} ${r.month <= 6 ? 'H1(上半年)' : 'H2(下半年)'}`;
+              if (!hMap[hKey]) hMap[hKey] = { inc: 0 };
+              hMap[hKey].inc += Math.abs(parseNum(r.total));
+            });
 
-            exp.forEach(r => addToH(r.year, r.month, 'exp', Math.abs(parseNum(r.total))));
-            inc.forEach(r => addToH(r.year, r.month, 'inc', Math.abs(parseNum(r.total))));
+            let halfYears = Object.keys(hMap).sort();
+            if (!halfYears.length) { halfYears = ['H1(上半年)', 'H2(下半年)']; halfYears.forEach(h => hMap[h] = { inc: 0 }); }
 
-            const halfYears = Object.keys(hMap).sort();
-            const incVals = halfYears.map(h => Math.round(hMap[h].inc * 100) / 100);
-            const expVals = halfYears.map(h => Math.round(hMap[h].exp * 100) / 100);
+            const memberColors = ['#f43f5e', '#f97316', '#ec4899', '#a855f7'];
+            const seriesList = [
+              {
+                name: '💰 家庭收入',
+                type: 'bar',
+                barMaxWidth: 28,
+                itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] },
+                data: halfYears.map(h => Math.round((hMap[h]?.inc || 0) * 100) / 100)
+              }
+            ];
+
+            members.forEach((m, idx) => {
+              seriesList.push({
+                name: `支出: ${m}`,
+                type: 'bar',
+                stack: 'halfYearExpense',
+                barMaxWidth: 28,
+                itemStyle: { color: memberColors[idx % memberColors.length] },
+                data: halfYears.map(h => Math.round((hMap[h]?.[m.toLowerCase()] || 0) * 100) / 100)
+              });
+            });
 
             return {
               tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-              legend: { data: ['收入', '支出'], top: 5, right: 'center' },
-              grid: { left: '3%', right: '4%', top: 45, bottom: 20, containLabel: true },
+              legend: {
+                top: 5, right: 'center',
+                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }]
+              },
+              grid: { left: '3%', right: '4%', top: 50, bottom: 20, containLabel: true },
               xAxis: { type: 'category', data: halfYears },
               yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-              series: [
-                { name: '收入', type: 'bar', barMaxWidth: 32, data: incVals, itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] } },
-                { name: '支出', type: 'bar', barMaxWidth: 32, data: expVals, itemStyle: { color: '#f43f5e', borderRadius: [3, 3, 0, 0] } }
-              ]
+              series: seriesList
             };
           } catch (e) {
-            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+            return { series: [] };
           }
 
   # ==============================================================================
-  # 4. 消费行为热力图与星期分布
+  # 4. 消费行为热力图与星期分布 (支持成员单选热力图)
   # ==============================================================================
   - name: "Heatmap · 消费热力图 🔥"
     panels:
-      - title: 全年每日支出频次与金额热力图 (GitHub 风格)
+      - title: 全年每日支出频次与金额热力图 (支持图例单选切换全家/成员打卡)
         type: echarts
         width: 100%
-        height: 250px
+        height: 270px
         script: |
           try {
+            const safeQuery = async (bql) => {
+              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            };
             const parseNum = (v) => {
               if (v == null) return 0;
               if (typeof v === 'number') return v;
@@ -468,23 +624,55 @@ dashboards:
               return 0;
             };
 
-            const data = await fava.query("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date") || [];
-            const points = data.map(r => [r.date, Math.abs(Math.round(parseNum(r.total) * 100) / 100)]);
+            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
+            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
+
+            const allData = await safeQuery("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date");
+            const allPoints = allData.map(r => [r.date, Math.abs(Math.round(parseNum(r.total) * 100) / 100)]);
+
+            const seriesList = [{
+              name: '👨‍👩‍👧‍👦 全家总热力',
+              type: 'heatmap',
+              coordinateSystem: 'calendar',
+              data: allPoints
+            }];
+
+            const rawData = await safeQuery("SELECT date, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date, owner");
+
+            members.forEach(m => {
+              const mPoints = rawData
+                .filter(r => (r.owner || '').toLowerCase() === m.toLowerCase())
+                .map(r => [r.date, Math.abs(Math.round(parseNum(r.total) * 100) / 100)]);
+
+              seriesList.push({
+                name: `👤 ${m}`,
+                type: 'heatmap',
+                coordinateSystem: 'calendar',
+                data: mPoints
+              });
+            });
 
             return {
-              tooltip: { position: 'top', formatter: (p) => `${p.value[0]}<br/>支出: ¥${p.value[1]}` },
+              tooltip: { position: 'top', formatter: (p) => `${p.seriesName}<br/>${p.value[0]} 支出: ¥${p.value[1]}` },
+              // ⭐️ 单选切换器：点击谁就切换到谁的热力图！
+              legend: {
+                top: 5,
+                left: 'center',
+                selectedMode: 'single',
+                textStyle: { fontSize: 11 }
+              },
               visualMap: {
                 min: 0,
                 max: 1000,
                 type: 'piecewise',
                 orient: 'horizontal',
                 right: 30,
-                top: 0,
+                top: 5,
                 textStyle: { fontSize: 11 },
                 inRange: { color: ['#dbeafe', '#93c5fd', '#3b82f6', '#1d4ed8'] }
               },
               calendar: {
-                top: 60,
+                top: 75,
                 left: 30,
                 right: 30,
                 range: '2026',
@@ -493,23 +681,22 @@ dashboards:
                 yearLabel: { show: false },
                 dayLabel: { firstDay: 1, nameMap: 'cn' }
               },
-              series: [{
-                type: 'heatmap',
-                coordinateSystem: 'calendar',
-                data: points
-              }]
+              series: seriesList
             };
           } catch (e) {
-            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+            return { series: [] };
           }
 
-      # --- 补充下方留白：星期消费分布雷达图 ---
-      - title: 周期消费行为画像 (周一 ~ 周日 消费频度分布)
+      # --- 4.2 星期画像 (按家庭成员对比/图例筛选) ---
+      - title: 周期消费行为画像 (按成员图例过滤/周一~周日消费对比)
         type: echarts
         width: 100%
-        height: 320px
+        height: 330px
         script: |
           try {
+            const safeQuery = async (bql) => {
+              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            };
             const parseNum = (v) => {
               if (v == null) return 0;
               if (typeof v === 'number') return v;
@@ -518,43 +705,41 @@ dashboards:
               return 0;
             };
 
-            const data = await fava.query("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date") || [];
-            if (!data || data.length === 0) {
-              return { title: { text: '暂无日常消费画像数据', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 13 } }, series: [] };
-            }
+            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
+            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
 
-            const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-            const dayTotals = [0, 0, 0, 0, 0, 0, 0];
+            const data = await safeQuery("SELECT date, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date, owner");
+            const orderedNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+            const memberColors = ['#f59e0b', '#ec4899', '#3b82f6', '#10b981'];
 
-            data.forEach(r => {
-              const d = new Date(r.date);
-              const day = d.getDay();
-              dayTotals[day] += Math.abs(parseNum(r.total));
+            const seriesList = members.map((m, idx) => {
+              const dayTotals = [0, 0, 0, 0, 0, 0, 0];
+              data.filter(r => (r.owner || '').toLowerCase() === m.toLowerCase()).forEach(r => {
+                const d = new Date(r.date);
+                dayTotals[d.getDay()] += Math.abs(parseNum(r.total));
+              });
+              const vals = [dayTotals[1], dayTotals[2], dayTotals[3], dayTotals[4], dayTotals[5], dayTotals[6], dayTotals[0]].map(v => Math.round(v * 100) / 100);
+
+              return {
+                name: `👤 ${m}`,
+                type: 'bar',
+                barMaxWidth: 24,
+                data: vals,
+                itemStyle: { color: memberColors[idx % memberColors.length], borderRadius: [3, 3, 0, 0] }
+              };
             });
 
-            // 顺延至周一开头：周一 ~ 周日
-            const orderedNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-            const orderedValues = [dayTotals[1], dayTotals[2], dayTotals[3], dayTotals[4], dayTotals[5], dayTotals[6], dayTotals[0]].map(v => Math.round(v * 100) / 100);
-
             return {
-              tooltip: { trigger: 'axis', formatter: '{b}: ¥{c}' },
-              grid: { left: '3%', right: '4%', top: 35, bottom: 25, containLabel: true },
+              tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+              legend: {
+                top: 5, right: 'center',
+                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }]
+              },
+              grid: { left: '3%', right: '4%', top: 50, bottom: 25, containLabel: true },
               xAxis: { type: 'category', data: orderedNames },
               yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-              series: [{
-                name: '星期支出',
-                type: 'bar',
-                barMaxWidth: 30,
-                data: orderedValues,
-                itemStyle: {
-                  color: {
-                    type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-                    colorStops: [{ offset: 0, color: '#f59e0b' }, { offset: 1, color: '#fbbf24' }]
-                  },
-                  borderRadius: [4, 4, 0, 0]
-                }
-              }]
+              series: seriesList.length ? seriesList : [{ type: 'bar', data: [0, 0, 0, 0, 0, 0, 0] }]
             };
           } catch (e) {
-            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+            return { series: [] };
           }

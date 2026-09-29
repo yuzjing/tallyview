@@ -1,174 +1,560 @@
-# /srv/tallyview/dashboards.yaml
 dashboards:
   # ==============================================================================
   # 1. 资产与净值总览大屏
   # ==============================================================================
-  - name: 📊 资产总览
+  - name: "Assets · 资产总览 ✨"
     panels:
       - title: 资产净值走势 (Net Worth Trend)
         type: echarts
         width: 100%
         height: 360px
         script: |
-          const data = await fava.query("SELECT date, sum(cost(position)) WHERE account ~ '^Assets|^Liabilities' GROUP BY date ORDER BY date");
-          const dates = data.map(r => r.date);
-          const values = data.map(r => Number(r.sum_cost_position.toFixed(2)));
-          return {
-            tooltip: { trigger: 'axis', formatter: '{b}<br/>净资产: <b>¥{c}</b>' },
-            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-            xAxis: { type: 'category', boundaryGap: false, data: dates },
-            yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-            series: [{
-              name: '净资产',
-              type: 'line',
-              smooth: true,
-              showSymbol: false,
-              data: values,
-              lineStyle: { width: 3, color: '#2563eb' },
-              areaStyle: {
-                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                  { offset: 0, color: 'rgba(37, 99, 235, 0.35)' },
-                  { offset: 1, color: 'rgba(37, 99, 235, 0.02)' }
-                ])
-              }
-            }]
-          };
+          try {
+            const parseNum = (v) => {
+              if (v == null) return 0;
+              if (typeof v === 'number') return v;
+              if (typeof v === 'string') return parseFloat(v.replace(/[^\d.-]/g, '')) || 0;
+              if (typeof v === 'object') { const k = Object.keys(v); return k.length ? parseNum(v[k[0]]) : 0; }
+              return 0;
+            };
+
+            const data = await fava.query("SELECT date, sum(cost(position)) as total WHERE account ~ '^Assets|^Liabilities' GROUP BY date ORDER BY date");
+            if (!data || data.length === 0) {
+              return { title: { text: '暂无净值走势数据', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 14 } }, series: [] };
+            }
+            const dates = data.map(r => r.date);
+            const values = data.map(r => Math.round(parseNum(r.total) * 100) / 100);
+
+            return {
+              tooltip: { trigger: 'axis', formatter: '{b}<br/>净资产: <b>¥{c}</b>' },
+              grid: { left: '3%', right: '4%', top: 40, bottom: 25, containLabel: true },
+              xAxis: { type: 'category', boundaryGap: false, data: dates },
+              yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+              series: [{
+                name: '净资产',
+                type: 'line',
+                smooth: true,
+                showSymbol: true,
+                symbolSize: 8,
+                data: values,
+                lineStyle: { width: 3, color: '#3b82f6' },
+                itemStyle: { color: '#2563eb' },
+                areaStyle: {
+                  color: {
+                    type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                    colorStops: [
+                      { offset: 0, color: 'rgba(59, 130, 246, 0.38)' },
+                      { offset: 1, color: 'rgba(59, 130, 246, 0.02)' }
+                    ]
+                  }
+                }
+              }]
+            };
+          } catch (e) {
+            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+          }
 
       - title: 资产账户结构分布
         type: echarts
         width: 50%
         height: 320px
         script: |
-          const data = await fava.query("SELECT root(account, 3) as acc, sum(cost(position)) as total WHERE account ~ '^Assets' GROUP BY acc ORDER BY total DESC");
-          const pieData = data.map(r => ({ name: r.acc.replace('Assets:', ''), value: Math.abs(Number(r.total.toFixed(2))) }));
-          return {
-            tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
-            legend: { orient: 'vertical', left: 'left', textStyle: { fontSize: 11 } },
-            series: [{
-              type: 'pie',
-              radius: ['45%', '70%'],
-              avoidLabelOverlap: false,
-              itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
-              label: { show: false },
-              data: pieData
-            }]
-          };
+          try {
+            const parseNum = (v) => {
+              if (v == null) return 0;
+              if (typeof v === 'number') return v;
+              if (typeof v === 'string') return parseFloat(v.replace(/[^\d.-]/g, '')) || 0;
+              if (typeof v === 'object') { const k = Object.keys(v); return k.length ? parseNum(v[k[0]]) : 0; }
+              return 0;
+            };
+
+            const data = await fava.query("SELECT root(account, 3) as acc, sum(cost(position)) as total WHERE account ~ '^Assets' GROUP BY acc ORDER BY total DESC");
+            if (!data || data.length === 0) {
+              return { title: { text: '暂无资产分布', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 13 } }, series: [] };
+            }
+
+            const pieData = data.map(r => {
+              const parts = r.acc.split(':');
+              const label = parts.length >= 3 ? parts[2] : r.acc.replace('Assets:', '');
+              return { name: label, value: Math.abs(Math.round(parseNum(r.total) * 100) / 100) };
+            });
+
+            const totalSum = pieData.reduce((acc, cur) => acc + cur.value, 0);
+
+            return {
+              tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+              legend: {
+                orient: 'vertical', left: 'left', top: 'middle', textStyle: { fontSize: 11 },
+                formatter: function(name) {
+                  const target = pieData.find(d => d.name === name);
+                  if (!target || totalSum === 0) return name;
+                  const pct = ((target.value / totalSum) * 100).toFixed(2);
+                  return `${name} (${pct}%)`;
+                }
+              },
+              series: [{
+                type: 'pie',
+                radius: ['45%', '70%'],
+                center: ['65%', '50%'],
+                avoidLabelOverlap: true,
+                itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
+                label: { show: false },
+                data: pieData
+              }]
+            };
+          } catch (e) {
+            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+          }
 
       - title: 负债与未结清账款
         type: echarts
         width: 50%
         height: 320px
         script: |
-          const data = await fava.query("SELECT root(account, 3) as acc, sum(cost(position)) as total WHERE account ~ '^Liabilities' GROUP BY acc ORDER BY total ASC");
-          const pieData = data.map(r => ({ name: r.acc.replace('Liabilities:', ''), value: Math.abs(Number(r.total.toFixed(2))) }));
-          return {
-            tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
-            legend: { orient: 'vertical', left: 'left', textStyle: { fontSize: 11 } },
-            series: [{
-              type: 'pie',
-              radius: ['45%', '70%'],
-              avoidLabelOverlap: false,
-              itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
-              label: { show: false },
-              data: pieData
-            }]
-          };
+          try {
+            const parseNum = (v) => {
+              if (v == null) return 0;
+              if (typeof v === 'number') return v;
+              if (typeof v === 'string') return parseFloat(v.replace(/[^\d.-]/g, '')) || 0;
+              if (typeof v === 'object') { const k = Object.keys(v); return k.length ? parseNum(v[k[0]]) : 0; }
+              return 0;
+            };
+
+            const data = await fava.query("SELECT root(account, 3) as acc, sum(cost(position)) as total WHERE account ~ '^Liabilities' GROUP BY acc ORDER BY total ASC");
+            if (!data || data.length === 0) {
+              return { title: { text: '🎉 当前无未结清负债', left: 'center', top: 'center', textStyle: { color: '#10b981', fontSize: 14 } }, series: [] };
+            }
+
+            const pieData = data.map(r => {
+              const parts = r.acc.split(':');
+              const label = parts.length >= 3 ? parts[2] : r.acc.replace('Liabilities:', '');
+              return { name: label, value: Math.abs(Math.round(parseNum(r.total) * 100) / 100) };
+            });
+
+            const totalSum = pieData.reduce((acc, cur) => acc + cur.value, 0);
+
+            return {
+              tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+              legend: {
+                orient: 'vertical', left: 'left', top: 'middle', textStyle: { fontSize: 11 },
+                formatter: function(name) {
+                  const target = pieData.find(d => d.name === name);
+                  if (!target || totalSum === 0) return name;
+                  const pct = ((target.value / totalSum) * 100).toFixed(2);
+                  return `${name} (${pct}%)`;
+                }
+              },
+              series: [{
+                type: 'pie',
+                radius: ['45%', '70%'],
+                center: ['65%', '50%'],
+                avoidLabelOverlap: true,
+                itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
+                label: { show: false },
+                data: pieData
+              }]
+            };
+          } catch (e) {
+            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+          }
 
   # ==============================================================================
-  # 2. 资金流向全景 (Sankey 桑基图)
+  # 2. 资金流向全景 (Sankey 桑基图 + 大类排行)
   # ==============================================================================
-  - name: 🌊 资金流向
+  - name: "Flow · 资金流向 🌊"
     panels:
-      - title: 收入 ➔ 核心支出 ➔ 储蓄资产沉淀
+      - title: 收入 ➔ 核心支出 ➔ 储蓄资产沉淀 (资金流向图)
         type: echarts
         width: 100%
         height: 520px
         script: |
-          const incData = await fava.query("SELECT sum(cost(position)) as total WHERE account ~ '^Income'");
-          const expData = await fava.query("SELECT root(account, 2) as cat, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY cat");
-          const totalIncome = Math.abs(incData[0]?.total || 0);
-          
-          const nodes = [{ name: '总收入' }];
-          const links = [];
-          let totalExpense = 0;
+          try {
+            const parseNum = (v) => {
+              if (v == null) return 0;
+              if (typeof v === 'number') return v;
+              if (typeof v === 'string') return parseFloat(v.replace(/[^\d.-]/g, '')) || 0;
+              if (typeof v === 'object') { const k = Object.keys(v); return k.length ? parseNum(v[k[0]]) : 0; }
+              return 0;
+            };
 
-          expData.forEach(r => {
-            const val = Math.abs(Number(r.total.toFixed(2)));
-            if (val > 0) {
-              const name = r.cat.replace('Expenses:', '支出:');
-              nodes.push({ name: name });
-              links.push({ source: '总收入', target: name, value: val });
-              totalExpense += val;
+            const incData = await fava.query("SELECT sum(cost(position)) as total WHERE account ~ '^Income'");
+            const expData = await fava.query("SELECT root(account, 2) as cat, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY cat");
+            const totalIncome = Math.abs(parseNum(incData?.[0]?.total));
+            
+            const nodes = [{ name: '总收入' }];
+            const links = [];
+            let totalExpense = 0;
+
+            if (expData && expData.length > 0) {
+              expData.forEach(r => {
+                const val = Math.abs(Math.round(parseNum(r.total) * 100) / 100);
+                if (val > 0) {
+                  const name = r.cat.replace('Expenses:', '支出:');
+                  nodes.push({ name: name });
+                  links.push({ source: '总收入', target: name, value: val });
+                  totalExpense += val;
+                }
+              });
             }
-          });
 
-          const savings = totalIncome > totalExpense ? Number((totalIncome - totalExpense).toFixed(2)) : 0;
-          if (savings > 0) {
-            nodes.push({ name: '结余储蓄' });
-            links.push({ source: '总收入', target: '结余储蓄', value: savings });
+            const savings = totalIncome > totalExpense ? Math.round((totalIncome - totalExpense) * 100) / 100 : 0;
+            if (savings > 0) {
+              nodes.push({ name: '结余储蓄' });
+              links.push({ source: '总收入', target: '结余储蓄', value: savings });
+            }
+
+            if (links.length === 0) {
+              return { title: { text: '暂无收支流向数据 (尚无支出或收入)', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 14 } }, series: [] };
+            }
+
+            return {
+              tooltip: { trigger: 'item', triggerOn: 'mousemove', formatter: '{b}: ¥{c}' },
+              series: [{
+                type: 'sankey',
+                layout: 'none',
+                top: 40,
+                bottom: 40,
+                emphasis: { focus: 'adjacency' },
+                nodeWidth: 18,
+                nodeGap: 16,
+                data: nodes,
+                links: links,
+                lineStyle: { color: 'gradient', curveness: 0.5 }
+              }]
+            };
+          } catch (e) {
+            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
           }
 
-          return {
-            tooltip: { trigger: 'item', triggerOn: 'mousemove', formatter: '{b}: ¥{c}' },
-            series: [{
-              type: 'sankey',
-              layout: 'none',
-              emphasis: { focus: 'adjacency' },
-              nodeWidth: 20,
-              nodeGap: 14,
-              data: nodes,
-              links: links,
-              lineStyle: { color: 'gradient', curveness: 0.5 }
-            }]
-          };
-
   # ==============================================================================
-  # 3. 月度收支与分类洞察
+  # 3. 周期收支深度大盘 (周 / 月 / 季 / 半年 4 宫格矩阵)
   # ==============================================================================
-  - name: 📈 月度收支
+  - name: "Monthly · 周期收支 📈"
     panels:
-      - title: 月度收支对比与结余走势
+      # --- 1. 周度收支趋势 (近 8 周) ---
+      - title: 1. 周度收支趋势 (近 8 周)
         type: echarts
-        width: 100%
-        height: 380px
+        width: 50%
+        height: 350px
         script: |
-          const exp = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month ORDER BY year, month");
-          const inc = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month ORDER BY year, month");
-          
-          const months = exp.map(r => `${r.year}-${String(r.month).padStart(2, '0')}`);
-          const expValues = exp.map(r => Math.abs(Number(r.total.toFixed(2))));
-          const incValues = months.map(m => {
-            const row = inc.find(r => `${r.year}-${String(r.month).padStart(2, '0')}` === m);
-            return row ? Math.abs(Number(row.total.toFixed(2))) : 0;
-          });
+          try {
+            const parseNum = (v) => {
+              if (v == null) return 0;
+              if (typeof v === 'number') return v;
+              if (typeof v === 'string') return parseFloat(v.replace(/[^\d.-]/g, '')) || 0;
+              if (typeof v === 'object') { const k = Object.keys(v); return k.length ? parseNum(v[k[0]]) : 0; }
+              return 0;
+            };
 
-          return {
-            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-            legend: { data: ['收入', '支出'] },
-            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-            xAxis: { type: 'category', data: months },
-            yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-            series: [
-              { name: '收入', type: 'bar', data: incValues, itemStyle: { color: '#10b981', borderRadius: [4, 4, 0, 0] } },
-              { name: '支出', type: 'bar', data: expValues, itemStyle: { color: '#ef4444', borderRadius: [4, 4, 0, 0] } }
-            ]
-          };
+            const expData = await fava.query("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date ORDER BY date") || [];
+            const incData = await fava.query("SELECT date, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY date ORDER BY date") || [];
+
+            if (expData.length === 0 && incData.length === 0) {
+              return { title: { text: '暂无周度流水数据', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 13 } }, series: [] };
+            }
+
+            // 按周划分字典
+            const getWeekLabel = (dStr) => {
+              const d = new Date(dStr);
+              const oneJan = new Date(d.getFullYear(), 0, 1);
+              const weekNum = Math.ceil((((d - oneJan) / 86400000) + oneJan.getDay() + 1) / 7);
+              return `W${weekNum}`;
+            };
+
+            const weekMap = {};
+            expData.forEach(r => {
+              const w = getWeekLabel(r.date);
+              if (!weekMap[w]) weekMap[w] = { exp: 0, inc: 0 };
+              weekMap[w].exp += Math.abs(parseNum(r.total));
+            });
+            incData.forEach(r => {
+              const w = getWeekLabel(r.date);
+              if (!weekMap[w]) weekMap[w] = { exp: 0, inc: 0 };
+              weekMap[w].inc += Math.abs(parseNum(r.total));
+            });
+
+            const weeks = Object.keys(weekMap).slice(-8); // 仅展示最近 8 周
+            const expValues = weeks.map(w => Math.round(weekMap[w].exp * 100) / 100);
+            const incValues = weeks.map(w => Math.round(weekMap[w].inc * 100) / 100);
+
+            return {
+              tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+              legend: { data: ['收入', '支出'], top: 5, right: 'center' },
+              grid: { left: '3%', right: '4%', top: 45, bottom: 20, containLabel: true },
+              xAxis: { type: 'category', data: weeks },
+              yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+              series: [
+                { name: '收入', type: 'bar', barMaxWidth: 24, data: incValues, itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] } },
+                { name: '支出', type: 'bar', barMaxWidth: 24, data: expValues, itemStyle: { color: '#f43f5e', borderRadius: [3, 3, 0, 0] } }
+              ]
+            };
+          } catch (e) {
+            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+          }
+
+      # --- 2. 月度收支与结余 (近 12 个月) ---
+      - title: 2. 月度收支对比与结余走势
+        type: echarts
+        width: 50%
+        height: 350px
+        script: |
+          try {
+            const parseNum = (v) => {
+              if (v == null) return 0;
+              if (typeof v === 'number') return v;
+              if (typeof v === 'string') return parseFloat(v.replace(/[^\d.-]/g, '')) || 0;
+              if (typeof v === 'object') { const k = Object.keys(v); return k.length ? parseNum(v[k[0]]) : 0; }
+              return 0;
+            };
+
+            const exp = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month ORDER BY year, month") || [];
+            const inc = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month ORDER BY year, month") || [];
+            
+            if (exp.length === 0 && inc.length === 0) {
+              return { title: { text: '暂无月度数据', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 13 } }, series: [] };
+            }
+
+            const months = Array.from(new Set([
+              ...exp.map(r => `${r.year}-${String(r.month).padStart(2, '0')}`),
+              ...inc.map(r => `${r.year}-${String(r.month).padStart(2, '0')}`)
+            ])).sort().slice(-12);
+
+            const expValues = months.map(m => {
+              const row = exp.find(r => `${r.year}-${String(r.month).padStart(2, '0')}` === m);
+              return row ? Math.abs(Math.round(parseNum(row.total) * 100) / 100) : 0;
+            });
+            const incValues = months.map(m => {
+              const row = inc.find(r => `${r.year}-${String(r.month).padStart(2, '0')}` === m);
+              return row ? Math.abs(Math.round(parseNum(row.total) * 100) / 100) : 0;
+            });
+            const savingsValues = months.map((_, i) => Math.round((incValues[i] - expValues[i]) * 100) / 100);
+
+            return {
+              tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+              legend: { data: ['收入', '支出', '净结余'], top: 5, right: 'center' },
+              grid: { left: '3%', right: '4%', top: 45, bottom: 20, containLabel: true },
+              xAxis: { type: 'category', data: months },
+              yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+              series: [
+                { name: '收入', type: 'bar', barMaxWidth: 24, data: incValues, itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] } },
+                { name: '支出', type: 'bar', barMaxWidth: 24, data: expValues, itemStyle: { color: '#f43f5e', borderRadius: [3, 3, 0, 0] } },
+                { name: '净结余', type: 'line', smooth: true, data: savingsValues, itemStyle: { color: '#3b82f6' }, lineStyle: { width: 2 } }
+              ]
+            };
+          } catch (e) {
+            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+          }
+
+      # --- 3. 季度收支与储蓄洞察 ---
+      - title: 3. 季度收支与储蓄洞察 (Q1 - Q4)
+        type: echarts
+        width: 50%
+        height: 350px
+        script: |
+          try {
+            const parseNum = (v) => {
+              if (v == null) return 0;
+              if (typeof v === 'number') return v;
+              if (typeof v === 'string') return parseFloat(v.replace(/[^\d.-]/g, '')) || 0;
+              if (typeof v === 'object') { const k = Object.keys(v); return k.length ? parseNum(v[k[0]]) : 0; }
+              return 0;
+            };
+
+            const exp = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month") || [];
+            const inc = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month") || [];
+            
+            if (exp.length === 0 && inc.length === 0) {
+              return { title: { text: '暂无季度数据', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 13 } }, series: [] };
+            }
+
+            const qMap = {};
+            const addToQ = (year, month, type, val) => {
+              const q = `Q${Math.ceil(month / 3)}`;
+              const key = `${year}-${q}`;
+              if (!qMap[key]) qMap[key] = { inc: 0, exp: 0 };
+              qMap[key][type] += val;
+            };
+
+            exp.forEach(r => addToQ(r.year, r.month, 'exp', Math.abs(parseNum(r.total))));
+            inc.forEach(r => addToQ(r.year, r.month, 'inc', Math.abs(parseNum(r.total))));
+
+            const quarters = Object.keys(qMap).sort();
+            const incVals = quarters.map(q => Math.round(qMap[q].inc * 100) / 100);
+            const expVals = quarters.map(q => Math.round(qMap[q].exp * 100) / 100);
+
+            return {
+              tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+              legend: { data: ['收入', '支出'], top: 5, right: 'center' },
+              grid: { left: '3%', right: '4%', top: 45, bottom: 20, containLabel: true },
+              xAxis: { type: 'category', data: quarters },
+              yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+              series: [
+                { name: '收入', type: 'bar', barMaxWidth: 28, data: incVals, itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] } },
+                { name: '支出', type: 'bar', barMaxWidth: 28, data: expVals, itemStyle: { color: '#f43f5e', borderRadius: [3, 3, 0, 0] } }
+              ]
+            };
+          } catch (e) {
+            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+          }
+
+      # --- 4. 半年度收支对比 (H1 / H2) ---
+      - title: 4. 半年度收支对比 (H1 上半年 vs H2 下半年)
+        type: echarts
+        width: 50%
+        height: 350px
+        script: |
+          try {
+            const parseNum = (v) => {
+              if (v == null) return 0;
+              if (typeof v === 'number') return v;
+              if (typeof v === 'string') return parseFloat(v.replace(/[^\d.-]/g, '')) || 0;
+              if (typeof v === 'object') { const k = Object.keys(v); return k.length ? parseNum(v[k[0]]) : 0; }
+              return 0;
+            };
+
+            const exp = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month") || [];
+            const inc = await fava.query("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month") || [];
+            
+            if (exp.length === 0 && inc.length === 0) {
+              return { title: { text: '暂无半年度数据', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 13 } }, series: [] };
+            }
+
+            const hMap = {};
+            const addToH = (year, month, type, val) => {
+              const h = month <= 6 ? 'H1 (上半年)' : 'H2 (下半年)';
+              const key = `${year} ${h}`;
+              if (!hMap[key]) hMap[key] = { inc: 0, exp: 0 };
+              hMap[key][type] += val;
+            };
+
+            exp.forEach(r => addToH(r.year, r.month, 'exp', Math.abs(parseNum(r.total))));
+            inc.forEach(r => addToH(r.year, r.month, 'inc', Math.abs(parseNum(r.total))));
+
+            const halfYears = Object.keys(hMap).sort();
+            const incVals = halfYears.map(h => Math.round(hMap[h].inc * 100) / 100);
+            const expVals = halfYears.map(h => Math.round(hMap[h].exp * 100) / 100);
+
+            return {
+              tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+              legend: { data: ['收入', '支出'], top: 5, right: 'center' },
+              grid: { left: '3%', right: '4%', top: 45, bottom: 20, containLabel: true },
+              xAxis: { type: 'category', data: halfYears },
+              yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+              series: [
+                { name: '收入', type: 'bar', barMaxWidth: 32, data: incVals, itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] } },
+                { name: '支出', type: 'bar', barMaxWidth: 32, data: expVals, itemStyle: { color: '#f43f5e', borderRadius: [3, 3, 0, 0] } }
+              ]
+            };
+          } catch (e) {
+            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+          }
 
   # ==============================================================================
-  # 4. 消费行为热力图与成员统计
+  # 4. 消费行为热力图与星期分布
   # ==============================================================================
-  - name: 🔥 消费热力图
+  - name: "Heatmap · 消费热力图 🔥"
     panels:
       - title: 全年每日支出频次与金额热力图 (GitHub 风格)
         type: echarts
         width: 100%
-        height: 240px
+        height: 250px
         script: |
-          const data = await fava.query("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date");
-          const points = data.map(r => [r.date, Math.abs(Number(r.total.toFixed(2)))]);
-          return {
-            tooltip: { position: 'top', formatter: (p) => `${p.value[0]}<br/>支出: ¥${p.value[1]}` },
-            visualMap: { min: 0, max: 1000, type: 'piecewise', orient: 'horizontal', left: 'center', top: 0, inRange: { color: ['#dbeafe', '#93c5fd', '#3b82f6', '#1d4ed8'] } },
-            calendar: { top: 45, left: 30, right: 30, range: '2026', splitLine: { show: true, lineStyle: { color: '#f3f4f6' } }, yearLabel: { show: false } },
-            series: { type: 'heatmap', coordinateSystem: 'calendar', data: points }
-          };
+          try {
+            const parseNum = (v) => {
+              if (v == null) return 0;
+              if (typeof v === 'number') return v;
+              if (typeof v === 'string') return parseFloat(v.replace(/[^\d.-]/g, '')) || 0;
+              if (typeof v === 'object') { const k = Object.keys(v); return k.length ? parseNum(v[k[0]]) : 0; }
+              return 0;
+            };
+
+            const data = await fava.query("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date") || [];
+            const points = data.map(r => [r.date, Math.abs(Math.round(parseNum(r.total) * 100) / 100)]);
+
+            return {
+              tooltip: { position: 'top', formatter: (p) => `${p.value[0]}<br/>支出: ¥${p.value[1]}` },
+              visualMap: {
+                min: 0,
+                max: 1000,
+                type: 'piecewise',
+                orient: 'horizontal',
+                right: 30,
+                top: 0,
+                textStyle: { fontSize: 11 },
+                inRange: { color: ['#dbeafe', '#93c5fd', '#3b82f6', '#1d4ed8'] }
+              },
+              calendar: {
+                top: 60,
+                left: 30,
+                right: 30,
+                range: '2026',
+                cellSize: ['auto', 15],
+                splitLine: { show: true, lineStyle: { color: '#f3f4f6' } },
+                yearLabel: { show: false },
+                dayLabel: { firstDay: 1, nameMap: 'cn' }
+              },
+              series: [{
+                type: 'heatmap',
+                coordinateSystem: 'calendar',
+                data: points
+              }]
+            };
+          } catch (e) {
+            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+          }
+
+      # --- 补充下方留白：星期消费分布雷达图 ---
+      - title: 周期消费行为画像 (周一 ~ 周日 消费频度分布)
+        type: echarts
+        width: 100%
+        height: 320px
+        script: |
+          try {
+            const parseNum = (v) => {
+              if (v == null) return 0;
+              if (typeof v === 'number') return v;
+              if (typeof v === 'string') return parseFloat(v.replace(/[^\d.-]/g, '')) || 0;
+              if (typeof v === 'object') { const k = Object.keys(v); return k.length ? parseNum(v[k[0]]) : 0; }
+              return 0;
+            };
+
+            const data = await fava.query("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date") || [];
+            if (!data || data.length === 0) {
+              return { title: { text: '暂无日常消费画像数据', left: 'center', top: 'center', textStyle: { color: '#9ca3af', fontSize: 13 } }, series: [] };
+            }
+
+            const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+            const dayTotals = [0, 0, 0, 0, 0, 0, 0];
+
+            data.forEach(r => {
+              const d = new Date(r.date);
+              const day = d.getDay();
+              dayTotals[day] += Math.abs(parseNum(r.total));
+            });
+
+            // 顺延至周一开头：周一 ~ 周日
+            const orderedNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+            const orderedValues = [dayTotals[1], dayTotals[2], dayTotals[3], dayTotals[4], dayTotals[5], dayTotals[6], dayTotals[0]].map(v => Math.round(v * 100) / 100);
+
+            return {
+              tooltip: { trigger: 'axis', formatter: '{b}: ¥{c}' },
+              grid: { left: '3%', right: '4%', top: 35, bottom: 25, containLabel: true },
+              xAxis: { type: 'category', data: orderedNames },
+              yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+              series: [{
+                name: '星期支出',
+                type: 'bar',
+                barMaxWidth: 30,
+                data: orderedValues,
+                itemStyle: {
+                  color: {
+                    type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                    colorStops: [{ offset: 0, color: '#f59e0b' }, { offset: 1, color: '#fbbf24' }]
+                  },
+                  borderRadius: [4, 4, 0, 0]
+                }
+              }]
+            };
+          } catch (e) {
+            return { title: { text: '加载失败: ' + e.message, left: 'center', top: 'center' }, series: [] };
+          }

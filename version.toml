@@ -1,0 +1,10 @@
+# tallyview 核心依赖版本锁 (SSOT)
+[components]
+fava = "1.28.0"
+fava-dashboards = "0.3.0"
+fava-envelope = "0.7.0"
+fava-portfolio-returns = "0.2.1"
+beancount-reds-plugins = "0.4.4"
+
+[meta]
+last_updated = "2026-09-29"

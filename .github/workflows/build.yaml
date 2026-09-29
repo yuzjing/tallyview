@@ -1,69 +1,121 @@
-name: Build and Publish TallyView Container
+name: Check Upstream & Build Image
 
 on:
+  schedule:
+    # 每周一上午 4:00 (UTC) 自动巡检
+    - cron: '0 4 * * 1'
+  workflow_dispatch: # 支持网页端随时手动点击检查
   push:
-    branches: [ "main" ]
-    tags: [ 'v*.*.*' ]
-  workflow_dispatch:
+    branches:
+      - main
+    paths:
+      - 'version.toml'
+      - 'Dockerfile'
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+permissions:
+  contents: write
+  packages: write
 
 jobs:
-  build-and-push:
+  check-and-build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
-      # 1. 检出代码
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. 先执行清理历史旧版本 (放在最前面，彻底杜绝误删新镜像！)
-      - name: Clean up old container versions
-        uses: actions/delete-package-versions@v5
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
         with:
-          package-name: 'tallyview'
-          package-type: 'container'
-          min-versions-to-keep: 10
-          delete-only-untagged-versions: 'false'
-          token: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
+          python-version: '3.13'
 
-      # 3. 初始化 Buildx
+      # ⭐️ 步骤 1：探测 PyPI 最新版本并比对
+      - name: Check for Upstream Updates
+        id: check_updates
+        run: |
+          python3 - << 'EOF'
+          import urllib.request
+          import json
+          import tomllib
+          import os
+          from datetime import date
+
+          with open("version.toml", "rb") as f:
+            data = tomllib.load(f)
+
+          components = data.get("components", {})
+          updated = False
+          changes = []
+          new_components = {}
+
+          for pkg, current_ver in components.items():
+            try:
+              url = f"https://pypi.org/pypi/{pkg}/json"
+              req = urllib.request.Request(url, headers={"User-Agent": "TallyView-CI"})
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                pypi_data = json.loads(resp.read().decode())
+                latest_ver = pypi_data["info"]["version"]
+                
+                if latest_ver != current_ver:
+                  print(f"🚀 发现新版本: {pkg} {current_ver} -> {latest_ver}")
+                  changes.append(f"{pkg}: {current_ver} -> {latest_ver}")
+                  new_components[pkg] = latest_ver
+                  updated = True
+                else:
+                  new_components[pkg] = current_ver
+            except Exception as e:
+              print(f"⚠️ 探测 {pkg} 失败: {e}")
+              new_components[pkg] = current_ver
+
+          if updated:
+            with open("version.toml", "w", encoding="utf-8") as f:
+              f.write("# tallyview 核心依赖版本锁 (SSOT)\n[components]\n")
+              for k, v in new_components.items():
+                f.write(f'{k} = "{v}"\n')
+              f.write(f'\n[meta]\nlast_updated = "{date.today().isoformat()}"\n')
+
+            summary = ", ".join(changes)
+            with open(os.environ["GITHUB_OUTPUT"], "a") as gh_out:
+              gh_out.write("needs_build=true\n")
+              gh_out.write(f"changes={summary}\n")
+          else:
+            print("✅ 所有组件均为最新，跳过编译构建。")
+            with open(os.environ["GITHUB_OUTPUT"], "a") as gh_out:
+              gh_out.write("needs_build=false\n")
+          EOF
+
+      # ⭐️ 步骤 2：构建多架构 Docker 镜像 (仅当有更新或手动提交时触发)
+      - name: Set up QEMU
+        if: steps.check_updates.outputs.needs_build == 'true' || github.event_name == 'push'
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
+        if: steps.check_updates.outputs.needs_build == 'true' || github.event_name == 'push'
         uses: docker/setup-buildx-action@v3
 
-      # 4. 登录 GHCR
-      - name: Log in to GitHub Container Registry
+      - name: Log in to GitHub Container Registry (GHCR)
+        if: steps.check_updates.outputs.needs_build == 'true' || github.event_name == 'push'
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 5. 提取 Docker 规范标签
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=sha,prefix=sha-
-
-      # 6. 高速编译并推送
-      - name: Build and push Docker image
+      - name: Build and Push Image
+        if: steps.check_updates.outputs.needs_build == 'true' || github.event_name == 'push'
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
-          provenance: false   
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # ⭐️ 步骤 3：将更新后的 version.toml 提交回写 GitHub
+      - name: Commit updated version.toml
+        if: steps.check_updates.outputs.needs_build == 'true'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(deps): 自动同步上游版本 [${{ steps.check_updates.outputs.changes }}]"
+          file_pattern: 'version.toml'

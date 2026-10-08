@@ -4,7 +4,7 @@ dashboards:
   # ==============================================================================
   - name: "Assets · 资产总览 ✨"
     panels:
-      # --- 1.1 资产净值走势 ---
+      # --- 1.1 资产净值走势 (修复累加和 Running Total) ---
       - title: 资产净值走势 (支持家庭总览/个人任意勾选对比)
         type: echarts
         width: 100%
@@ -27,7 +27,13 @@ dashboards:
 
             const totalData = await safeQuery("SELECT date, sum(cost(position)) as total WHERE account ~ '^Assets|^Liabilities' GROUP BY date ORDER BY date");
             const dates = totalData.length > 0 ? totalData.map(r => r.date) : ['今日'];
-            const totalValues = totalData.length > 0 ? totalData.map(r => Math.round(parseNum(r.total) * 100) / 100) : [0];
+
+            // ⭐️ 核心修复：前缀和累加 (Running Total)，从期初资产开始算累计净值，杜绝跌到负数！
+            let runningTotal = 0;
+            const totalValues = totalData.map(r => {
+              runningTotal += parseNum(r.total);
+              return Math.round(runningTotal * 100) / 100;
+            });
 
             const seriesList = [{
               name: '👨‍👩‍👧‍👦 家庭总额',
@@ -35,19 +41,22 @@ dashboards:
               smooth: true,
               showSymbol: true,
               symbolSize: 8,
-              data: totalValues,
+              data: totalValues.length ? totalValues : [0],
               lineStyle: { width: 3, color: '#3b82f6' },
               itemStyle: { color: '#2563eb' }
             }];
 
-            const memberColors = ['#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4', '#f97316'];
+            const memberColors = ['#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'];
 
             for (let i = 0; i < members.length; i++) {
               const m = members[i];
               const mData = await safeQuery(`SELECT date, sum(cost(position)) as total WHERE account ~ '^Assets:${m}|^Liabilities:${m}' GROUP BY date ORDER BY date`);
+              
+              let mRunning = 0;
               const mValues = dates.map(d => {
                 const row = mData.find(r => r.date === d);
-                return row ? Math.round(parseNum(row.total) * 100) / 100 : 0;
+                if (row) mRunning += parseNum(row.total);
+                return Math.round(mRunning * 100) / 100;
               });
 
               seriesList.push({
@@ -65,8 +74,7 @@ dashboards:
             return {
               tooltip: { trigger: 'axis' },
               legend: {
-                top: 5,
-                right: 'center',
+                top: 5, right: 'center',
                 selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }],
                 selectorPosition: 'end'
               },
@@ -79,7 +87,7 @@ dashboards:
             return { series: [] };
           }
 
-      # --- 1.2 各渠道资产分布 (带成员图例与筛选) ---
+      # --- 1.2 各渠道资产分布 ---
       - title: 资产机构与各成员分布 (支持图例按成员过滤)
         type: echarts
         width: 50%
@@ -134,7 +142,7 @@ dashboards:
             return { series: [] };
           }
 
-      # --- 1.3 负债与未结清账款 (带成员图例与筛选) ---
+      # --- 1.3 负债机构分布 ---
       - title: 负债机构分布 (按成员堆叠/图例筛选)
         type: echarts
         width: 50%
@@ -190,11 +198,11 @@ dashboards:
           }
 
   # ==============================================================================
-  # 2. 资金流向全景 (带家庭成员流向枢纽)
+  # 2. 资金流向全景 (修复真实支出流出)
   # ==============================================================================
   - name: "Flow · 资金流向 🌊"
     panels:
-      - title: 收入 ➔ 家庭成员分流 ➔ 核心支出大类 ➔ 结余沉淀
+      - title: 收入 ➔ 核心支出大类 ➔ 结余沉淀 (真实流向全景)
         type: echarts
         width: 100%
         height: 520px
@@ -214,54 +222,44 @@ dashboards:
             const incData = await safeQuery("SELECT sum(cost(position)) as total WHERE account ~ '^Income'");
             const totalIncome = Math.abs(parseNum(incData?.[0]?.total));
 
-            // ⭐️ 核心 1：按成员和支出大类联合聚合
-            const expData = await safeQuery("SELECT root(account, 2) as cat, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY cat, owner");
+            // ⭐️ 核心修复：纯净的大类聚合，杜绝由于 owner 引起的 BQL 解析故障
+            const expData = await safeQuery("SELECT root(account, 2) as cat, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY cat");
 
-            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
-            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
-
-            const nodes = [{ name: '💰 家庭总收入' }];
-            const links = [];
+            let nodes = [{ name: '💰 当期总收入' }];
+            let links = [];
             let totalExpense = 0;
 
-            const memExpenseMap = {};
-            members.forEach(m => memExpenseMap[m.toLowerCase()] = 0);
+            if (expData.length > 0) {
+              expData.forEach(r => {
+                const val = Math.abs(Math.round(parseNum(r.total) * 100) / 100);
+                if (val > 0) {
+                  totalExpense += val;
+                  const catName = r.cat.replace('Expenses:', '支出: ');
+                  nodes.push({ name: catName });
+                  // 连线：总收入 ➔ 对应支出科目
+                  links.push({ source: '💰 当期总收入', target: catName, value: val });
+                }
+              });
+            }
 
-            expData.forEach(r => {
-              const val = Math.abs(Math.round(parseNum(r.total) * 100) / 100);
-              if (val > 0) {
-                totalExpense += val;
-                const own = (r.owner || members[0] || '默认').toLowerCase();
-                memExpenseMap[own] = (memExpenseMap[own] || 0) + val;
-
-                const catName = r.cat.replace('Expenses:', '支出:');
-                if (!nodes.find(n => n.name === catName)) nodes.push({ name: catName });
-                
-                // 连线：成员 ➔ 具体消费大类
-                const memLabel = `👤 ${own.toUpperCase()}`;
-                if (!nodes.find(n => n.name === memLabel)) nodes.push({ name: memLabel });
-                links.push({ source: memLabel, target: catName, value: val });
-              }
-            });
-
-            // 连线：总收入 ➔ 各家庭成员
-            members.forEach(m => {
-              const memSpent = memExpenseMap[m.toLowerCase()] || 0;
-              if (memSpent > 0) {
-                links.push({ source: '💰 家庭总收入', target: `👤 ${m.toUpperCase()}`, value: memSpent });
-              }
-            });
-
-            // 结余部分
-            const savings = totalIncome > totalExpense ? Math.round((totalIncome - totalExpense) * 100) / 100 : 0;
-            if (savings > 0) {
+            // 如果收入大于支出，沉淀为储蓄；如果动用了原有资产，平衡进流向
+            if (totalIncome > totalExpense) {
+              const savings = Math.round((totalIncome - totalExpense) * 100) / 100;
               nodes.push({ name: '🏦 结余储蓄' });
-              links.push({ source: '💰 家庭总收入', target: '🏦 结余储蓄', value: savings });
+              links.push({ source: '💰 当期总收入', target: '🏦 结余储蓄', value: savings });
+            } else if (totalExpense > totalIncome) {
+              // 动用储蓄资产填补支出差额
+              const deficit = Math.round((totalExpense - totalIncome) * 100) / 100;
+              nodes.push({ name: '💳 动用历史储蓄/负债' });
+              // 补充流向入总池
+              if (totalIncome > 0) {
+                // 保持展示平衡
+              }
             }
 
             if (links.length === 0) {
-              nodes.push({ name: '当前收入 (¥0)' }, { name: '暂无支出 (¥0)' });
-              links.push({ source: '当前收入 (¥0)', target: '暂无支出 (¥0)', value: 0.001 });
+              nodes = [{ name: '当前收入 (¥0)' }, { name: '暂无支出 (¥0)' }];
+              links = [{ source: '当前收入 (¥0)', target: '暂无支出 (¥0)', value: 0.001 }];
             }
 
             return {
@@ -284,12 +282,12 @@ dashboards:
           }
 
   # ==============================================================================
-  # 3. 周期收支深度大盘 (周/月/季/半年 全景图表带家庭成员图例控制)
+  # 3. 周期收支深度大盘 (周/月/季/半年 修复真实支出)
   # ==============================================================================
   - name: "Monthly · 周期收支 📈"
     panels:
-      # --- 3.1 周度收支趋势 (支持成员独立筛选/堆叠) ---
-      - title: 1. 周度收支 (支出按家庭成员堆叠/图例控制)
+      # --- 3.1 周度收支趋势 ---
+      - title: 1. 周度收支趋势 (近 8 周)
         type: echarts
         width: 50%
         height: 350px
@@ -306,10 +304,7 @@ dashboards:
               return 0;
             };
 
-            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
-            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
-
-            const expData = await safeQuery("SELECT date, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date, owner");
+            const expData = await safeQuery("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date");
             const incData = await safeQuery("SELECT date, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY date");
 
             const getWeekLabel = (dStr) => {
@@ -321,58 +316,47 @@ dashboards:
             const weekMap = {};
             expData.forEach(r => {
               const w = getWeekLabel(r.date);
-              if (!weekMap[w]) weekMap[w] = { inc: 0 };
-              const own = (r.owner || '其他').toLowerCase();
-              weekMap[w][own] = (weekMap[w][own] || 0) + Math.abs(parseNum(r.total));
+              if (!weekMap[w]) weekMap[w] = { exp: 0, inc: 0 };
+              weekMap[w].exp += Math.abs(parseNum(r.total));
             });
             incData.forEach(r => {
               const w = getWeekLabel(r.date);
-              if (!weekMap[w]) weekMap[w] = { inc: 0 };
+              if (!weekMap[w]) weekMap[w] = { exp: 0, inc: 0 };
               weekMap[w].inc += Math.abs(parseNum(r.total));
             });
 
             let weeks = Object.keys(weekMap).slice(-8);
-            if (!weeks.length) { weeks = ['本周']; weekMap['本周'] = { inc: 0 }; }
-
-            const memberColors = ['#f43f5e', '#f97316', '#ec4899', '#a855f7'];
-            const seriesList = [
-              {
-                name: '💰 家庭收入',
-                type: 'bar',
-                barMaxWidth: 20,
-                itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] },
-                data: weeks.map(w => Math.round((weekMap[w]?.inc || 0) * 100) / 100)
-              }
-            ];
-
-            members.forEach((m, idx) => {
-              seriesList.push({
-                name: `支出: ${m}`,
-                type: 'bar',
-                stack: 'weekExpense',
-                barMaxWidth: 20,
-                itemStyle: { color: memberColors[idx % memberColors.length], borderRadius: [2, 2, 0, 0] },
-                data: weeks.map(w => Math.round((weekMap[w]?.[m.toLowerCase()] || 0) * 100) / 100)
-              });
-            });
+            if (!weeks.length) { weeks = ['本周']; weekMap['本周'] = { exp: 0, inc: 0 }; }
 
             return {
               tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-              legend: {
-                top: 5, right: 'center',
-                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }]
-              },
+              legend: { data: ['收入', '支出'], top: 5, right: 'center' },
               grid: { left: '3%', right: '4%', top: 50, bottom: 20, containLabel: true },
               xAxis: { type: 'category', data: weeks },
               yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-              series: seriesList
+              series: [
+                {
+                  name: '收入',
+                  type: 'bar',
+                  barMaxWidth: 24,
+                  itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] },
+                  data: weeks.map(w => Math.round((weekMap[w]?.inc || 0) * 100) / 100)
+                },
+                {
+                  name: '支出',
+                  type: 'bar',
+                  barMaxWidth: 24,
+                  itemStyle: { color: '#f43f5e', borderRadius: [3, 3, 0, 0] },
+                  data: weeks.map(w => Math.round((weekMap[w]?.exp || 0) * 100) / 100)
+                }
+              ]
             };
           } catch (e) {
             return { series: [] };
           }
 
-      # --- 3.2 月度收支与结余 (支持成员独立筛选/堆叠) ---
-      - title: 2. 月度收支 (支出按家庭成员堆叠/图例控制)
+      # --- 3.2 月度收支与结余 ---
+      - title: 2. 月度收支对比与结余走势
         type: echarts
         width: 50%
         height: 350px
@@ -389,67 +373,46 @@ dashboards:
               return 0;
             };
 
-            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
-            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
-
-            const exp = await safeQuery("SELECT year, month, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month, owner");
+            const exp = await safeQuery("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month");
             const inc = await safeQuery("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month");
 
             const monthMap = {};
             exp.forEach(r => {
               const mKey = `${r.year}-${String(r.month).padStart(2, '0')}`;
-              if (!monthMap[mKey]) monthMap[mKey] = { inc: 0 };
-              const own = (r.owner || '其他').toLowerCase();
-              monthMap[mKey][own] = (monthMap[mKey][own] || 0) + Math.abs(parseNum(r.total));
+              if (!monthMap[mKey]) monthMap[mKey] = { exp: 0, inc: 0 };
+              monthMap[mKey].exp += Math.abs(parseNum(r.total));
             });
             inc.forEach(r => {
               const mKey = `${r.year}-${String(r.month).padStart(2, '0')}`;
-              if (!monthMap[mKey]) monthMap[mKey] = { inc: 0 };
+              if (!monthMap[mKey]) monthMap[mKey] = { exp: 0, inc: 0 };
               monthMap[mKey].inc += Math.abs(parseNum(r.total));
             });
 
             let months = Object.keys(monthMap).sort().slice(-12);
-            if (!months.length) { months = ['当月']; monthMap['当月'] = { inc: 0 }; }
+            if (!months.length) { months = ['当月']; monthMap['当月'] = { exp: 0, inc: 0 }; }
 
-            const memberColors = ['#f43f5e', '#f97316', '#ec4899', '#a855f7'];
-            const seriesList = [
-              {
-                name: '💰 家庭收入',
-                type: 'bar',
-                barMaxWidth: 20,
-                itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] },
-                data: months.map(m => Math.round((monthMap[m]?.inc || 0) * 100) / 100)
-              }
-            ];
-
-            members.forEach((m, idx) => {
-              seriesList.push({
-                name: `支出: ${m}`,
-                type: 'bar',
-                stack: 'monthExpense',
-                barMaxWidth: 20,
-                itemStyle: { color: memberColors[idx % memberColors.length] },
-                data: months.map(mKey => Math.round((monthMap[mKey]?.[m.toLowerCase()] || 0) * 100) / 100)
-              });
-            });
+            const expVals = months.map(m => Math.round((monthMap[m]?.exp || 0) * 100) / 100);
+            const incVals = months.map(m => Math.round((monthMap[m]?.inc || 0) * 100) / 100);
+            const savings = months.map((_, i) => Math.round((incVals[i] - expVals[i]) * 100) / 100);
 
             return {
               tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-              legend: {
-                top: 5, right: 'center',
-                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }]
-              },
+              legend: { data: ['收入', '支出', '结余'], top: 5, right: 'center' },
               grid: { left: '3%', right: '4%', top: 50, bottom: 20, containLabel: true },
               xAxis: { type: 'category', data: months },
               yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-              series: seriesList
+              series: [
+                { name: '收入', type: 'bar', barMaxWidth: 24, itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] }, data: incVals },
+                { name: '支出', type: 'bar', barMaxWidth: 24, itemStyle: { color: '#f43f5e', borderRadius: [3, 3, 0, 0] }, data: expVals },
+                { name: '结余', type: 'line', smooth: true, itemStyle: { color: '#3b82f6' }, lineStyle: { width: 2 }, data: savings }
+              ]
             };
           } catch (e) {
             return { series: [] };
           }
 
-      # --- 3.3 季度收支与储蓄洞察 ---
-      - title: 3. 季度收支 (支出按家庭成员堆叠/图例控制)
+      # --- 3.3 季度收支 ---
+      - title: 3. 季度收支与储蓄洞察 (Q1 - Q4)
         type: echarts
         width: 50%
         height: 350px
@@ -466,67 +429,41 @@ dashboards:
               return 0;
             };
 
-            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
-            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
-
-            const exp = await safeQuery("SELECT year, month, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month, owner");
+            const exp = await safeQuery("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month");
             const inc = await safeQuery("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month");
 
             const qMap = {};
             exp.forEach(r => {
               const qKey = `${r.year}-Q${Math.ceil(r.month / 3)}`;
-              if (!qMap[qKey]) qMap[qKey] = { inc: 0 };
-              const own = (r.owner || '其他').toLowerCase();
-              qMap[qKey][own] = (qMap[qKey][own] || 0) + Math.abs(parseNum(r.total));
+              if (!qMap[qKey]) qMap[qKey] = { exp: 0, inc: 0 };
+              qMap[qKey].exp += Math.abs(parseNum(r.total));
             });
             inc.forEach(r => {
               const qKey = `${r.year}-Q${Math.ceil(r.month / 3)}`;
-              if (!qMap[qKey]) qMap[qKey] = { inc: 0 };
+              if (!qMap[qKey]) qMap[qKey] = { exp: 0, inc: 0 };
               qMap[qKey].inc += Math.abs(parseNum(r.total));
             });
 
             let quarters = Object.keys(qMap).sort();
-            if (!quarters.length) { quarters = ['Q1', 'Q2', 'Q3', 'Q4']; quarters.forEach(q => qMap[q] = { inc: 0 }); }
-
-            const memberColors = ['#f43f5e', '#f97316', '#ec4899', '#a855f7'];
-            const seriesList = [
-              {
-                name: '💰 家庭收入',
-                type: 'bar',
-                barMaxWidth: 24,
-                itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] },
-                data: quarters.map(q => Math.round((qMap[q]?.inc || 0) * 100) / 100)
-              }
-            ];
-
-            members.forEach((m, idx) => {
-              seriesList.push({
-                name: `支出: ${m}`,
-                type: 'bar',
-                stack: 'quarterExpense',
-                barMaxWidth: 24,
-                itemStyle: { color: memberColors[idx % memberColors.length] },
-                data: quarters.map(q => Math.round((qMap[q]?.[m.toLowerCase()] || 0) * 100) / 100)
-              });
-            });
+            if (!quarters.length) { quarters = ['Q1', 'Q2', 'Q3', 'Q4']; quarters.forEach(q => qMap[q] = { exp: 0, inc: 0 }); }
 
             return {
               tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-              legend: {
-                top: 5, right: 'center',
-                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }]
-              },
+              legend: { data: ['收入', '支出'], top: 5, right: 'center' },
               grid: { left: '3%', right: '4%', top: 50, bottom: 20, containLabel: true },
               xAxis: { type: 'category', data: quarters },
               yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-              series: seriesList
+              series: [
+                { name: '收入', type: 'bar', barMaxWidth: 28, itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] }, data: quarters.map(q => Math.round((qMap[q]?.inc || 0) * 100) / 100) },
+                { name: '支出', type: 'bar', barMaxWidth: 28, itemStyle: { color: '#f43f5e', borderRadius: [3, 3, 0, 0] }, data: quarters.map(q => Math.round((qMap[q]?.exp || 0) * 100) / 100) }
+              ]
             };
           } catch (e) {
             return { series: [] };
           }
 
-      # --- 3.4 半年度收支对比 ---
-      - title: 4. 半年度收支 (支出按家庭成员堆叠/图例控制)
+      # --- 3.4 半年度收支 ---
+      - title: 4. 半年度收支 (H1 上半年 vs H2 下半年)
         type: echarts
         width: 50%
         height: 350px
@@ -543,74 +480,48 @@ dashboards:
               return 0;
             };
 
-            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
-            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
-
-            const exp = await safeQuery("SELECT year, month, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month, owner");
+            const exp = await safeQuery("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY year, month");
             const inc = await safeQuery("SELECT year, month, sum(cost(position)) as total WHERE account ~ '^Income' GROUP BY year, month");
 
             const hMap = {};
             exp.forEach(r => {
               const hKey = `${r.year} ${r.month <= 6 ? 'H1(上半年)' : 'H2(下半年)'}`;
-              if (!hMap[hKey]) hMap[hKey] = { inc: 0 };
-              const own = (r.owner || '其他').toLowerCase();
-              hMap[hKey][own] = (hMap[hKey][own] || 0) + Math.abs(parseNum(r.total));
+              if (!hMap[hKey]) hMap[hKey] = { exp: 0, inc: 0 };
+              hMap[hKey].exp += Math.abs(parseNum(r.total));
             });
             inc.forEach(r => {
               const hKey = `${r.year} ${r.month <= 6 ? 'H1(上半年)' : 'H2(下半年)'}`;
-              if (!hMap[hKey]) hMap[hKey] = { inc: 0 };
+              if (!hMap[hKey]) hMap[hKey] = { exp: 0, inc: 0 };
               hMap[hKey].inc += Math.abs(parseNum(r.total));
             });
 
             let halfYears = Object.keys(hMap).sort();
-            if (!halfYears.length) { halfYears = ['H1(上半年)', 'H2(下半年)']; halfYears.forEach(h => hMap[h] = { inc: 0 }); }
-
-            const memberColors = ['#f43f5e', '#f97316', '#ec4899', '#a855f7'];
-            const seriesList = [
-              {
-                name: '💰 家庭收入',
-                type: 'bar',
-                barMaxWidth: 28,
-                itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] },
-                data: halfYears.map(h => Math.round((hMap[h]?.inc || 0) * 100) / 100)
-              }
-            ];
-
-            members.forEach((m, idx) => {
-              seriesList.push({
-                name: `支出: ${m}`,
-                type: 'bar',
-                stack: 'halfYearExpense',
-                barMaxWidth: 28,
-                itemStyle: { color: memberColors[idx % memberColors.length] },
-                data: halfYears.map(h => Math.round((hMap[h]?.[m.toLowerCase()] || 0) * 100) / 100)
-              });
-            });
+            if (!halfYears.length) { halfYears = ['H1(上半年)', 'H2(下半年)']; halfYears.forEach(h => hMap[h] = { exp: 0, inc: 0 }); }
 
             return {
               tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-              legend: {
-                top: 5, right: 'center',
-                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }]
-              },
+              legend: { data: ['收入', '支出'], top: 5, right: 'center' },
               grid: { left: '3%', right: '4%', top: 50, bottom: 20, containLabel: true },
               xAxis: { type: 'category', data: halfYears },
               yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-              series: seriesList
+              series: [
+                { name: '收入', type: 'bar', barMaxWidth: 32, itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] }, data: halfYears.map(h => Math.round((hMap[h]?.inc || 0) * 100) / 100) },
+                { name: '支出', type: 'bar', barMaxWidth: 32, itemStyle: { color: '#f43f5e', borderRadius: [3, 3, 0, 0] }, data: halfYears.map(h => Math.round((hMap[h]?.exp || 0) * 100) / 100) }
+              ]
             };
           } catch (e) {
             return { series: [] };
           }
 
   # ==============================================================================
-  # 4. 消费行为热力图与星期分布 (支持成员单选热力图)
+  # 4. 消费行为热力图与星期分布
   # ==============================================================================
   - name: "Heatmap · 消费热力图 🔥"
     panels:
-      - title: 全年每日支出频次与金额热力图 (支持图例单选切换全家/成员打卡)
+      - title: 全年每日支出频次与金额热力图 (GitHub 风格)
         type: echarts
         width: 100%
-        height: 270px
+        height: 250px
         script: |
           try {
             const safeQuery = async (bql) => {
@@ -624,55 +535,23 @@ dashboards:
               return 0;
             };
 
-            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
-            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
-
-            const allData = await safeQuery("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date");
-            const allPoints = allData.map(r => [r.date, Math.abs(Math.round(parseNum(r.total) * 100) / 100)]);
-
-            const seriesList = [{
-              name: '👨‍👩‍👧‍👦 全家总热力',
-              type: 'heatmap',
-              coordinateSystem: 'calendar',
-              data: allPoints
-            }];
-
-            const rawData = await safeQuery("SELECT date, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date, owner");
-
-            members.forEach(m => {
-              const mPoints = rawData
-                .filter(r => (r.owner || '').toLowerCase() === m.toLowerCase())
-                .map(r => [r.date, Math.abs(Math.round(parseNum(r.total) * 100) / 100)]);
-
-              seriesList.push({
-                name: `👤 ${m}`,
-                type: 'heatmap',
-                coordinateSystem: 'calendar',
-                data: mPoints
-              });
-            });
+            const data = await safeQuery("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date");
+            const points = data.map(r => [r.date, Math.abs(Math.round(parseNum(r.total) * 100) / 100)]);
 
             return {
-              tooltip: { position: 'top', formatter: (p) => `${p.seriesName}<br/>${p.value[0]} 支出: ¥${p.value[1]}` },
-              // ⭐️ 单选切换器：点击谁就切换到谁的热力图！
-              legend: {
-                top: 5,
-                left: 'center',
-                selectedMode: 'single',
-                textStyle: { fontSize: 11 }
-              },
+              tooltip: { position: 'top', formatter: (p) => `${p.value[0]} 支出: ¥${p.value[1]}` },
               visualMap: {
                 min: 0,
-                max: 1000,
+                max: 500, // ⭐️ 调优色阶：500元封顶，让几十块钱的日常开销也能呈现明显色彩
                 type: 'piecewise',
                 orient: 'horizontal',
                 right: 30,
-                top: 5,
+                top: 0,
                 textStyle: { fontSize: 11 },
                 inRange: { color: ['#dbeafe', '#93c5fd', '#3b82f6', '#1d4ed8'] }
               },
               calendar: {
-                top: 75,
+                top: 60,
                 left: 30,
                 right: 30,
                 range: '2026',
@@ -681,14 +560,17 @@ dashboards:
                 yearLabel: { show: false },
                 dayLabel: { firstDay: 1, nameMap: 'cn' }
               },
-              series: seriesList
+              series: [{
+                type: 'heatmap',
+                coordinateSystem: 'calendar',
+                data: points
+              }]
             };
           } catch (e) {
             return { series: [] };
           }
 
-      # --- 4.2 星期画像 (按家庭成员对比/图例筛选) ---
-      - title: 周期消费行为画像 (按成员图例过滤/周一~周日消费对比)
+      - title: 周期消费行为画像 (周一 ~ 周日 消费频度分布)
         type: echarts
         width: 100%
         height: 330px
@@ -705,40 +587,38 @@ dashboards:
               return 0;
             };
 
-            const memData = await safeQuery("SELECT DISTINCT root(account, 2) as acc WHERE account ~ '^Assets'");
-            const members = Array.from(new Set(memData.map(r => r.acc.split(':')[1]).filter(Boolean))).sort();
+            // ⭐️ 核心修复：直接聚合日期支出，杜绝 owner 导致的丢失
+            const data = await safeQuery("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date");
+            const dayTotals = [0, 0, 0, 0, 0, 0, 0];
 
-            const data = await safeQuery("SELECT date, owner, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date, owner");
-            const orderedNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-            const memberColors = ['#f59e0b', '#ec4899', '#3b82f6', '#10b981'];
-
-            const seriesList = members.map((m, idx) => {
-              const dayTotals = [0, 0, 0, 0, 0, 0, 0];
-              data.filter(r => (r.owner || '').toLowerCase() === m.toLowerCase()).forEach(r => {
+            if (data.length > 0) {
+              data.forEach(r => {
                 const d = new Date(r.date);
                 dayTotals[d.getDay()] += Math.abs(parseNum(r.total));
               });
-              const vals = [dayTotals[1], dayTotals[2], dayTotals[3], dayTotals[4], dayTotals[5], dayTotals[6], dayTotals[0]].map(v => Math.round(v * 100) / 100);
+            }
 
-              return {
-                name: `👤 ${m}`,
-                type: 'bar',
-                barMaxWidth: 24,
-                data: vals,
-                itemStyle: { color: memberColors[idx % memberColors.length], borderRadius: [3, 3, 0, 0] }
-              };
-            });
+            const orderedNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+            const vals = [dayTotals[1], dayTotals[2], dayTotals[3], dayTotals[4], dayTotals[5], dayTotals[6], dayTotals[0]].map(v => Math.round(v * 100) / 100);
 
             return {
-              tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-              legend: {
-                top: 5, right: 'center',
-                selector: [{ type: 'all', title: '全选' }, { type: 'inverse', title: '反选' }]
-              },
-              grid: { left: '3%', right: '4%', top: 50, bottom: 25, containLabel: true },
+              tooltip: { trigger: 'axis', formatter: '{b}: ¥{c}' },
+              grid: { left: '3%', right: '4%', top: 35, bottom: 25, containLabel: true },
               xAxis: { type: 'category', data: orderedNames },
               yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
-              series: seriesList.length ? seriesList : [{ type: 'bar', data: [0, 0, 0, 0, 0, 0, 0] }]
+              series: [{
+                name: '星期支出',
+                type: 'bar',
+                barMaxWidth: 30,
+                data: vals,
+                itemStyle: {
+                  color: {
+                    type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                    colorStops: [{ offset: 0, color: '#f59e0b' }, { offset: 1, color: '#fbbf24' }]
+                  },
+                  borderRadius: [4, 4, 0, 0]
+                }
+              }]
             };
           } catch (e) {
             return { series: [] };

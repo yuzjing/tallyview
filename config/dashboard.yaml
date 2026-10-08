@@ -4,15 +4,24 @@ dashboards:
   # ==============================================================================
   - name: "Assets · 资产总览 ✨"
     panels:
-      # --- 1.1 资产净值走势 (修复累加和 Running Total) ---
+      # --- 1.1 资产净值走势 (修复累加和 Running Total + 微重试防爆) ---
       - title: 资产净值走势 (支持家庭总览/个人任意勾选对比)
         type: echarts
         width: 100%
         height: 380px
         script: |
           try {
-            const safeQuery = async (bql) => {
-              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            const safeQuery = async (bql, retries = 2) => {
+              try {
+                const r = await fava.query(bql);
+                return Array.isArray(r) ? r : [];
+              } catch (e) {
+                if (retries > 0) {
+                  await new Promise(res => setTimeout(res, 250)); // 避开 Fava 0.25 秒热重载间隙
+                  return safeQuery(bql, retries - 1);
+                }
+                return [];
+              }
             };
             const parseNum = (v) => {
               if (v == null) return 0;
@@ -28,7 +37,6 @@ dashboards:
             const totalData = await safeQuery("SELECT date, sum(cost(position)) as total WHERE account ~ '^Assets|^Liabilities' GROUP BY date ORDER BY date");
             const dates = totalData.length > 0 ? totalData.map(r => r.date) : ['今日'];
 
-            // ⭐️ 核心修复：前缀和累加 (Running Total)，从期初资产开始算累计净值，杜绝跌到负数！
             let runningTotal = 0;
             const totalValues = totalData.map(r => {
               runningTotal += parseNum(r.total);
@@ -94,8 +102,17 @@ dashboards:
         height: 350px
         script: |
           try {
-            const safeQuery = async (bql) => {
-              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            const safeQuery = async (bql, retries = 2) => {
+              try {
+                const r = await fava.query(bql);
+                return Array.isArray(r) ? r : [];
+              } catch (e) {
+                if (retries > 0) {
+                  await new Promise(res => setTimeout(res, 250));
+                  return safeQuery(bql, retries - 1);
+                }
+                return [];
+              }
             };
             const parseNum = (v) => {
               if (v == null) return 0;
@@ -149,8 +166,17 @@ dashboards:
         height: 350px
         script: |
           try {
-            const safeQuery = async (bql) => {
-              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            const safeQuery = async (bql, retries = 2) => {
+              try {
+                const r = await fava.query(bql);
+                return Array.isArray(r) ? r : [];
+              } catch (e) {
+                if (retries > 0) {
+                  await new Promise(res => setTimeout(res, 250));
+                  return safeQuery(bql, retries - 1);
+                }
+                return [];
+              }
             };
             const parseNum = (v) => {
               if (v == null) return 0;
@@ -198,7 +224,7 @@ dashboards:
           }
 
   # ==============================================================================
-  # 2. 资金流向全景 (修复真实支出流出)
+  # 2. 资金流向全景 (带微重试防爆)
   # ==============================================================================
   - name: "Flow · 资金流向 🌊"
     panels:
@@ -208,8 +234,17 @@ dashboards:
         height: 520px
         script: |
           try {
-            const safeQuery = async (bql) => {
-              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            const safeQuery = async (bql, retries = 2) => {
+              try {
+                const r = await fava.query(bql);
+                return Array.isArray(r) ? r : [];
+              } catch (e) {
+                if (retries > 0) {
+                  await new Promise(res => setTimeout(res, 250));
+                  return safeQuery(bql, retries - 1);
+                }
+                return [];
+              }
             };
             const parseNum = (v) => {
               if (v == null) return 0;
@@ -222,7 +257,6 @@ dashboards:
             const incData = await safeQuery("SELECT sum(cost(position)) as total WHERE account ~ '^Income'");
             const totalIncome = Math.abs(parseNum(incData?.[0]?.total));
 
-            // ⭐️ 核心修复：纯净的大类聚合，杜绝由于 owner 引起的 BQL 解析故障
             const expData = await safeQuery("SELECT root(account, 2) as cat, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY cat");
 
             let nodes = [{ name: '💰 当期总收入' }];
@@ -236,25 +270,17 @@ dashboards:
                   totalExpense += val;
                   const catName = r.cat.replace('Expenses:', '支出: ');
                   nodes.push({ name: catName });
-                  // 连线：总收入 ➔ 对应支出科目
                   links.push({ source: '💰 当期总收入', target: catName, value: val });
                 }
               });
             }
 
-            // 如果收入大于支出，沉淀为储蓄；如果动用了原有资产，平衡进流向
             if (totalIncome > totalExpense) {
               const savings = Math.round((totalIncome - totalExpense) * 100) / 100;
               nodes.push({ name: '🏦 结余储蓄' });
               links.push({ source: '💰 当期总收入', target: '🏦 结余储蓄', value: savings });
             } else if (totalExpense > totalIncome) {
-              // 动用储蓄资产填补支出差额
-              const deficit = Math.round((totalExpense - totalIncome) * 100) / 100;
               nodes.push({ name: '💳 动用历史储蓄/负债' });
-              // 补充流向入总池
-              if (totalIncome > 0) {
-                // 保持展示平衡
-              }
             }
 
             if (links.length === 0) {
@@ -282,7 +308,7 @@ dashboards:
           }
 
   # ==============================================================================
-  # 3. 周期收支深度大盘 (周/月/季/半年 修复真实支出)
+  # 3. 周期收支深度大盘 (周/月/季/半年)
   # ==============================================================================
   - name: "Monthly · 周期收支 📈"
     panels:
@@ -293,8 +319,17 @@ dashboards:
         height: 350px
         script: |
           try {
-            const safeQuery = async (bql) => {
-              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            const safeQuery = async (bql, retries = 2) => {
+              try {
+                const r = await fava.query(bql);
+                return Array.isArray(r) ? r : [];
+              } catch (e) {
+                if (retries > 0) {
+                  await new Promise(res => setTimeout(res, 250));
+                  return safeQuery(bql, retries - 1);
+                }
+                return [];
+              }
             };
             const parseNum = (v) => {
               if (v == null) return 0;
@@ -362,8 +397,17 @@ dashboards:
         height: 350px
         script: |
           try {
-            const safeQuery = async (bql) => {
-              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            const safeQuery = async (bql, retries = 2) => {
+              try {
+                const r = await fava.query(bql);
+                return Array.isArray(r) ? r : [];
+              } catch (e) {
+                if (retries > 0) {
+                  await new Promise(res => setTimeout(res, 250));
+                  return safeQuery(bql, retries - 1);
+                }
+                return [];
+              }
             };
             const parseNum = (v) => {
               if (v == null) return 0;
@@ -379,17 +423,17 @@ dashboards:
             const monthMap = {};
             exp.forEach(r => {
               const mKey = `${r.year}-${String(r.month).padStart(2, '0')}`;
-              if (!monthMap[mKey]) monthMap[mKey] = { exp: 0, inc: 0 };
+              if (!monthMap[mKey]) monthMap[mKey] = { inc: 0, exp: 0 };
               monthMap[mKey].exp += Math.abs(parseNum(r.total));
             });
             inc.forEach(r => {
               const mKey = `${r.year}-${String(r.month).padStart(2, '0')}`;
-              if (!monthMap[mKey]) monthMap[mKey] = { exp: 0, inc: 0 };
+              if (!monthMap[mKey]) monthMap[mKey] = { inc: 0, exp: 0 };
               monthMap[mKey].inc += Math.abs(parseNum(r.total));
             });
 
             let months = Object.keys(monthMap).sort().slice(-12);
-            if (!months.length) { months = ['当月']; monthMap['当月'] = { exp: 0, inc: 0 }; }
+            if (!months.length) { months = ['当月']; monthMap['当月'] = { inc: 0, exp: 0 }; }
 
             const expVals = months.map(m => Math.round((monthMap[m]?.exp || 0) * 100) / 100);
             const incVals = months.map(m => Math.round((monthMap[m]?.inc || 0) * 100) / 100);
@@ -418,8 +462,17 @@ dashboards:
         height: 350px
         script: |
           try {
-            const safeQuery = async (bql) => {
-              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            const safeQuery = async (bql, retries = 2) => {
+              try {
+                const r = await fava.query(bql);
+                return Array.isArray(r) ? r : [];
+              } catch (e) {
+                if (retries > 0) {
+                  await new Promise(res => setTimeout(res, 250));
+                  return safeQuery(bql, retries - 1);
+                }
+                return [];
+              }
             };
             const parseNum = (v) => {
               if (v == null) return 0;
@@ -435,17 +488,17 @@ dashboards:
             const qMap = {};
             exp.forEach(r => {
               const qKey = `${r.year}-Q${Math.ceil(r.month / 3)}`;
-              if (!qMap[qKey]) qMap[qKey] = { exp: 0, inc: 0 };
+              if (!qMap[qKey]) qMap[qKey] = { inc: 0, exp: 0 };
               qMap[qKey].exp += Math.abs(parseNum(r.total));
             });
             inc.forEach(r => {
               const qKey = `${r.year}-Q${Math.ceil(r.month / 3)}`;
-              if (!qMap[qKey]) qMap[qKey] = { exp: 0, inc: 0 };
+              if (!qMap[qKey]) qMap[qKey] = { inc: 0, exp: 0 };
               qMap[qKey].inc += Math.abs(parseNum(r.total));
             });
 
             let quarters = Object.keys(qMap).sort();
-            if (!quarters.length) { quarters = ['Q1', 'Q2', 'Q3', 'Q4']; quarters.forEach(q => qMap[q] = { exp: 0, inc: 0 }); }
+            if (!quarters.length) { quarters = ['Q1', 'Q2', 'Q3', 'Q4']; quarters.forEach(q => qMap[q] = { inc: 0, exp: 0 }); }
 
             return {
               tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -469,8 +522,17 @@ dashboards:
         height: 350px
         script: |
           try {
-            const safeQuery = async (bql) => {
-              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            const safeQuery = async (bql, retries = 2) => {
+              try {
+                const r = await fava.query(bql);
+                return Array.isArray(r) ? r : [];
+              } catch (e) {
+                if (retries > 0) {
+                  await new Promise(res => setTimeout(res, 250));
+                  return safeQuery(bql, retries - 1);
+                }
+                return [];
+              }
             };
             const parseNum = (v) => {
               if (v == null) return 0;
@@ -486,17 +548,17 @@ dashboards:
             const hMap = {};
             exp.forEach(r => {
               const hKey = `${r.year} ${r.month <= 6 ? 'H1(上半年)' : 'H2(下半年)'}`;
-              if (!hMap[hKey]) hMap[hKey] = { exp: 0, inc: 0 };
+              if (!hMap[hKey]) hMap[hKey] = { inc: 0, exp: 0 };
               hMap[hKey].exp += Math.abs(parseNum(r.total));
             });
             inc.forEach(r => {
               const hKey = `${r.year} ${r.month <= 6 ? 'H1(上半年)' : 'H2(下半年)'}`;
-              if (!hMap[hKey]) hMap[hKey] = { exp: 0, inc: 0 };
+              if (!hMap[hKey]) hMap[hKey] = { inc: 0, exp: 0 };
               hMap[hKey].inc += Math.abs(parseNum(r.total));
             });
 
             let halfYears = Object.keys(hMap).sort();
-            if (!halfYears.length) { halfYears = ['H1(上半年)', 'H2(下半年)']; halfYears.forEach(h => hMap[h] = { exp: 0, inc: 0 }); }
+            if (!halfYears.length) { halfYears = ['H1(上半年)', 'H2(下半年)']; halfYears.forEach(h => hMap[h] = { inc: 0, exp: 0 }); }
 
             return {
               tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -514,7 +576,7 @@ dashboards:
           }
 
   # ==============================================================================
-  # 4. 消费行为热力图与星期分布 (修复大额丢失与星期柱状图)
+  # 4. 消费行为热力图与星期分布 (带微重试防爆)
   # ==============================================================================
   - name: "Heatmap · 消费热力图 🔥"
     panels:
@@ -525,8 +587,17 @@ dashboards:
         height: 250px
         script: |
           try {
-            const safeQuery = async (bql) => {
-              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            const safeQuery = async (bql, retries = 2) => {
+              try {
+                const r = await fava.query(bql);
+                return Array.isArray(r) ? r : [];
+              } catch (e) {
+                if (retries > 0) {
+                  await new Promise(res => setTimeout(res, 250));
+                  return safeQuery(bql, retries - 1);
+                }
+                return [];
+              }
             };
             const parseNum = (v) => {
               if (v == null) return 0;
@@ -541,7 +612,6 @@ dashboards:
 
             return {
               tooltip: { position: 'top', formatter: (p) => `${p.value[0]} 支出: ¥${p.value[1]}` },
-              // ⭐️ 核心修复：显式分段，最后一段加 min: 1000 (无上限)，大额买电视 5306 元稳稳染上最深蓝色！
               visualMap: {
                 type: 'piecewise',
                 orient: 'horizontal',
@@ -553,13 +623,13 @@ dashboards:
                   { min: 50, max: 200, label: '50-200' },
                   { min: 200, max: 500, label: '200-500' },
                   { min: 500, max: 1000, label: '500-1000' },
-                  { min: 1000, label: '1000+' } // ⭐️ 超过1000元绝不掉白！
+                  { min: 1000, label: '1000+' }
                 ],
                 inRange: {
                   color: ['#dbeafe', '#93c5fd', '#60a5fa', '#2563eb', '#1e40af']
                 },
                 outOfRange: {
-                  color: '#f9fafb' // 0 元未消费显示极浅白灰
+                  color: '#f9fafb'
                 }
               },
               calendar: {
@@ -589,8 +659,17 @@ dashboards:
         height: 330px
         script: |
           try {
-            const safeQuery = async (bql) => {
-              try { const r = await fava.query(bql); return Array.isArray(r) ? r : []; } catch (e) { return []; }
+            const safeQuery = async (bql, retries = 2) => {
+              try {
+                const r = await fava.query(bql);
+                return Array.isArray(r) ? r : [];
+              } catch (e) {
+                if (retries > 0) {
+                  await new Promise(res => setTimeout(res, 250));
+                  return safeQuery(bql, retries - 1);
+                }
+                return [];
+              }
             };
             const parseNum = (v) => {
               if (v == null) return 0;
@@ -606,12 +685,10 @@ dashboards:
             if (data.length > 0) {
               data.forEach(r => {
                 const d = new Date(r.date);
-                // 汇总每天的开销
                 dayTotals[d.getDay()] += Math.abs(parseNum(r.total));
               });
             }
 
-            // 顺延至周一开头：周一 ~ 周日
             const orderedNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
             const vals = [dayTotals[1], dayTotals[2], dayTotals[3], dayTotals[4], dayTotals[5], dayTotals[6], dayTotals[0]].map(v => Math.round(v * 100) / 100);
 

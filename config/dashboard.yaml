@@ -514,10 +514,11 @@ dashboards:
           }
 
   # ==============================================================================
-  # 4. 消费行为热力图与星期分布
+  # 4. 消费行为热力图与星期分布 (修复大额丢失与星期柱状图)
   # ==============================================================================
   - name: "Heatmap · 消费热力图 🔥"
     panels:
+      # --- 4.1 全年每日支出热力图 ---
       - title: 全年每日支出频次与金额热力图 (GitHub 风格)
         type: echarts
         width: 100%
@@ -540,15 +541,26 @@ dashboards:
 
             return {
               tooltip: { position: 'top', formatter: (p) => `${p.value[0]} 支出: ¥${p.value[1]}` },
+              // ⭐️ 核心修复：显式分段，最后一段加 min: 1000 (无上限)，大额买电视 5306 元稳稳染上最深蓝色！
               visualMap: {
-                min: 0,
-                max: 500, // ⭐️ 调优色阶：500元封顶，让几十块钱的日常开销也能呈现明显色彩
                 type: 'piecewise',
                 orient: 'horizontal',
                 right: 30,
                 top: 0,
                 textStyle: { fontSize: 11 },
-                inRange: { color: ['#dbeafe', '#93c5fd', '#3b82f6', '#1d4ed8'] }
+                pieces: [
+                  { min: 0.01, max: 50, label: '0-50' },
+                  { min: 50, max: 200, label: '50-200' },
+                  { min: 200, max: 500, label: '200-500' },
+                  { min: 500, max: 1000, label: '500-1000' },
+                  { min: 1000, label: '1000+' } // ⭐️ 超过1000元绝不掉白！
+                ],
+                inRange: {
+                  color: ['#dbeafe', '#93c5fd', '#60a5fa', '#2563eb', '#1e40af']
+                },
+                outOfRange: {
+                  color: '#f9fafb' // 0 元未消费显示极浅白灰
+                }
               },
               calendar: {
                 top: 60,
@@ -570,6 +582,7 @@ dashboards:
             return { series: [] };
           }
 
+      # --- 4.2 星期画像 ---
       - title: 周期消费行为画像 (周一 ~ 周日 消费频度分布)
         type: echarts
         width: 100%
@@ -587,29 +600,30 @@ dashboards:
               return 0;
             };
 
-            // ⭐️ 核心修复：直接聚合日期支出，杜绝 owner 导致的丢失
             const data = await safeQuery("SELECT date, sum(cost(position)) as total WHERE account ~ '^Expenses' GROUP BY date");
             const dayTotals = [0, 0, 0, 0, 0, 0, 0];
 
             if (data.length > 0) {
               data.forEach(r => {
                 const d = new Date(r.date);
+                // 汇总每天的开销
                 dayTotals[d.getDay()] += Math.abs(parseNum(r.total));
               });
             }
 
+            // 顺延至周一开头：周一 ~ 周日
             const orderedNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
             const vals = [dayTotals[1], dayTotals[2], dayTotals[3], dayTotals[4], dayTotals[5], dayTotals[6], dayTotals[0]].map(v => Math.round(v * 100) / 100);
 
             return {
-              tooltip: { trigger: 'axis', formatter: '{b}: ¥{c}' },
+              tooltip: { trigger: 'axis', formatter: '{b}: 支出 ¥{c}' },
               grid: { left: '3%', right: '4%', top: 35, bottom: 25, containLabel: true },
               xAxis: { type: 'category', data: orderedNames },
               yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
               series: [{
                 name: '星期支出',
                 type: 'bar',
-                barMaxWidth: 30,
+                barMaxWidth: 32,
                 data: vals,
                 itemStyle: {
                   color: {
